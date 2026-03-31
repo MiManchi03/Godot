@@ -1,0 +1,178 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/settings_menu.gd" id="1_hf4si"]
+
+[node name="SettingsMenu" type="CanvasLayer"]
+script = ExtResource("1_hf4si")
+
+[node name="Panel" type="Panel" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -225.0
+offset_right = 300.0
+offset_bottom = 225.0
+
+[node name="MarginContainer" type="MarginContainer" parent="Panel"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel/MarginContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/separation = 15
+
+[node name="Title" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+text = "设置"
+horizontal_alignment = 1
+
+[node name="ControlGroupTitle" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+text = "◆ 控制设置"
+vertical_alignment = 1
+
+[node name="RightDragYawRow" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="RightDragYawLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/RightDragYawRow"]
+custom_minimum_size = Vector2(120, 0)
+size_flags_horizontal = 3
+text = "鼠标灵敏度"
+vertical_alignment = 1
+
+[node name="YawMinus" type="Button" parent="Panel/MarginContainer/VBoxContainer/RightDragYawRow"]
+custom_minimum_size = Vector2(30, 0)
+text = "<"
+
+[node name="RightDragYawSlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/RightDragYawRow"]
+custom_minimum_size = Vector2(150, 0)
+
+[node name="YawPlus" type="Button" parent="Panel/MarginContainer/VBoxContainer/RightDragYawRow"]
+custom_minimum_size = Vector2(30, 0)
+text = ">"
+
+[node name="RightDragYawValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/RightDragYawRow"]
+custom_minimum_size = Vector2(50, 0)
+text = "35"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="CameraDragEnabledCheckBox" type="CheckButton" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "开启右键拖动视角"
+
+[node name="CameraDragSensitivityRow" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CameraDragSensitivityLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow"]
+custom_minimum_size = Vector2(120, 0)
+size_flags_horizontal = 3
+text = "右键拖动灵敏度"
+vertical_alignment = 1
+
+[node name="DragSensitivityMinus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow"]
+custom_minimum_size = Vector2(30, 0)
+text = "<"
+
+[node name="CameraDragSensitivitySlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow"]
+custom_minimum_size = Vector2(150, 0)
+
+[node name="DragSensitivityPlus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow"]
+custom_minimum_size = Vector2(30, 0)
+text = ">"
+
+[node name="CameraDragSensitivityValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow"]
+custom_minimum_size = Vector2(50, 0)
+text = "1.0"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="HSeparator1" type="HSeparator" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CameraGroupTitle" type="Label" parent="Panel/MarginContainer/VBoxContainer"]
+text = "◆ 相机设置"
+vertical_alignment = 1
+
+[node name="CameraTiltRow" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CameraTiltLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
+custom_minimum_size = Vector2(120, 0)
+size_flags_horizontal = 3
+text = "相机倾斜"
+vertical_alignment = 1
+
+[node name="TiltMinus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
+custom_minimum_size = Vector2(30, 0)
+text = "<"
+
+[node name="CameraTiltSlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
+custom_minimum_size = Vector2(150, 0)
+
+[node name="TiltPlus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
+custom_minimum_size = Vector2(30, 0)
+text = ">"
+
+[node name="CameraTiltValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
+custom_minimum_size = Vector2(50, 0)
+text = "2.0"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="CameraDistanceRow" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CameraDistanceLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
+custom_minimum_size = Vector2(120, 0)
+size_flags_horizontal = 3
+text = "相机距离"
+vertical_alignment = 1
+
+[node name="DistanceMinus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
+custom_minimum_size = Vector2(30, 0)
+text = "<"
+
+[node name="CameraDistanceSlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
+custom_minimum_size = Vector2(150, 0)
+
+[node name="DistancePlus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
+custom_minimum_size = Vector2(30, 0)
+text = ">"
+
+[node name="CameraDistanceValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
+custom_minimum_size = Vector2(50, 0)
+text = "10.0"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CloseButton" type="Button" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "关闭"
+
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/YawMinus" to="." method="_on_yaw_minus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/YawPlus" to="." method="_on_yaw_plus_pressed"]
+[connection signal="toggled" from="Panel/MarginContainer/VBoxContainer/CameraDragEnabledCheckBox" to="." method="_on_camera_drag_enabled_toggled"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/DragSensitivityMinus" to="." method="_on_drag_sensitivity_minus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/DragSensitivityPlus" to="." method="_on_drag_sensitivity_plus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/TiltMinus" to="." method="_on_tilt_minus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/TiltPlus" to="." method="_on_tilt_plus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistanceMinus" to="." method="_on_distance_minus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistancePlus" to="." method="_on_distance_plus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CloseButton" to="." method="_on_close_button_pressed"]
+[connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/RightDragYawSlider" to="." method="_on_right_drag_yaw_slider_value_changed"]
+[connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/CameraDragSensitivitySlider" to="." method="_on_camera_drag_sensitivity_slider_value_changed"]
+[connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/CameraTiltSlider" to="." method="_on_camera_tilt_slider_value_changed"]
+[connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/CameraDistanceSlider" to="." method="_on_camera_distance_slider_value_changed"]

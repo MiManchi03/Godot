@@ -1,0 +1,85 @@
+[gd_scene format=3 uid="uid://cnr8mt5t5ut4h"]
+
+[ext_resource type="Script" uid="uid://bdte8clbchrau" path="res://scripts/player/player_controller.gd" id="1_5x3at"]
+[ext_resource type="Script" uid="uid://dyxpt6s0jaulv" path="res://scripts/world/world_manager.gd" id="2_7k2pr"]
+[ext_resource type="PackedScene" path="res://scenes/settings_menu.tscn" id="3_f0w31"]
+[ext_resource type="PackedScene" path="res://scenes/hotbar_ui.tscn" id="4_hbui"]
+[ext_resource type="PackedScene" path="res://scenes/inventory_ui.tscn" id="5_invui"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.28, 0.55, 0.86, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_2x8ga"]
+size = Vector3(0.6, 0.9, 0.45)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_head"]
+albedo_color = Color(0.95, 0.79, 0.63, 1)
+roughness = 0.95
+
+[sub_resource type="SphereMesh" id="SphereMesh_3msjp"]
+radius = 0.22
+height = 0.44
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_accent"]
+albedo_color = Color(0.95, 0.29, 0.23, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_c6le7"]
+size = Vector3(0.12, 0.1, 0.18)
+
+[sub_resource type="BoxMesh" id="BoxMesh_hfgr8"]
+size = Vector3(0.18, 0.18, 0.18)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_k6l7d"]
+radius = 0.35
+height = 1.1
+
+[node name="World" type="Node3D" unique_id=1493242209]
+
+[node name="HotbarUI" parent="." unique_id=248478711 instance=ExtResource("4_hbui")]
+
+[node name="InventoryUI" parent="." unique_id=1000143680 instance=ExtResource("5_invui")]
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=495460987]
+transform = Transform3D(0.8191522, -0.4698461, 0.32898983, 0, 0.5735765, 0.819152, -0.5735762, -0.67101014, 0.46984646, 0, 0, 0)
+light_energy = 2.0
+shadow_enabled = true
+
+[node name="Player" type="CharacterBody3D" parent="." unique_id=270758752]
+script = ExtResource("1_5x3at")
+
+[node name="Visual" type="Node3D" parent="Player" unique_id=574146668]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.95, 0)
+
+[node name="Body" type="MeshInstance3D" parent="Player/Visual" unique_id=1826967250]
+material_override = SubResource("StandardMaterial3D_body")
+mesh = SubResource("BoxMesh_2x8ga")
+
+[node name="Head" type="MeshInstance3D" parent="Player/Visual" unique_id=614463503]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.58, 0)
+material_override = SubResource("StandardMaterial3D_head")
+mesh = SubResource("SphereMesh_3msjp")
+
+[node name="Nose" type="MeshInstance3D" parent="Player/Visual" unique_id=1436177710]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.58, 0.28)
+material_override = SubResource("StandardMaterial3D_accent")
+mesh = SubResource("BoxMesh_c6le7")
+
+[node name="LeftShoulderPad" type="MeshInstance3D" parent="Player/Visual" unique_id=455643246]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.34, 0.2, 0)
+material_override = SubResource("StandardMaterial3D_accent")
+mesh = SubResource("BoxMesh_hfgr8")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=533497164]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_k6l7d")
+
+[node name="Camera3D" type="Camera3D" parent="Player" unique_id=349081019]
+current = true
+far = 3000.0
+
+[node name="WorldManager" type="Node3D" parent="." unique_id=1641717395]
+script = ExtResource("2_7k2pr")
+
+[node name="SettingsMenu" parent="." unique_id=1502802260 instance=ExtResource("3_f0w31")]

@@ -1,0 +1,40 @@
+[gd_scene format=3 uid="uid://b5k3a5dad1e2f"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_k6l7d"]
+radius = 0.5
+height = 2.0
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_1"]
+size = Vector2(100, 100)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_1"]
+albedo_color = Color(0.3, 0.6, 0.3, 1)
+
+[node name="MinimalTest" type="Node3D"]
+
+[node name="Player" type="CharacterBody3D" parent="."]
+position = Vector3(0, 2, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Player"]
+current = true
+far = 3000.0
+position = Vector3(0, 1, -5)
+rotation = Vector3(0.2, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
+shape = SubResource("CapsuleShape3D_k6l7d")
+position = Vector3(0, 1.0, 0)
+
+[node name="Ground" type="StaticBody3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("PlaneMesh_1")
+material_override = SubResource("StandardMaterial3D_1")
+rotation = Vector3(-90, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_1")
+position = Vector3(0, -0.5, 0)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_1"]
+size = Vector3(100, 1, 100)
