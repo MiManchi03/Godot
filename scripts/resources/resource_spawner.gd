@@ -33,13 +33,13 @@ func populate_chunk(parent: Node3D, chunk_coord: Vector2i, chunk_size: int, biom
 func _attempt_count(biome: BiomeGenerator.Biome) -> int:
 	match biome:
 		BiomeKind.PLAINS:
-			return 30
-		BiomeKind.FOREST:
-			return 38
-		BiomeKind.HILLS:
-			return 26
-		_:
 			return 20
+		BiomeKind.FOREST:
+			return 25
+		BiomeKind.HILLS:
+			return 18
+		_:
+			return 12
 
 
 func _pick_resource_type(rng: RandomNumberGenerator, biome: BiomeGenerator.Biome) -> StringName:

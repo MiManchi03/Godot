@@ -1,12 +1,12 @@
 extends CharacterBody3D
 
-@export var move_speed: float = 9.0
-@export var sprint_speed_multiplier: float = 1.7778
+@export var move_speed: float = 6.0
+@export var sprint_speed_multiplier: float = 1.8
 @export var sprint_double_tap_window: float = 0.3
 @export var sprint_fov_boost: float = 8.0
 @export var sprint_fov_lerp_speed: float = 8.0
-@export var acceleration: float = 22.0
-@export var air_acceleration: float = 36.0
+@export var acceleration: float = 12.0
+@export var air_acceleration: float = 20.0
 @export var rotation_speed: float = 6.0
 @export var air_rotation_speed: float = 32.0
 @export var jump_velocity: float = 14.4
@@ -28,6 +28,19 @@ var is_destroying: bool = false
 var current_target: Destructible = null
 var destroy_progress: float = 0.0
 
+var _sin_angle: float = 0.0
+var _cos_angle: float = 1.0
+var _last_angle: float = 0.0
+var _angle_cache_valid: bool = false
+var _tilt_cached: float = 0.0
+var _horizontal_radius_cached: float = 0.0
+var _height_cached: float = 0.0
+var _geometry_cache_valid: bool = false
+
+var _last_raycast_pos: Vector2 = Vector2.ZERO
+var _raycast_timer: float = 0.0
+const RAYCAST_INTERVAL: float = 0.1
+
 func _ready() -> void:
 	print("=== PLAYER SCRIPT LOADED ===")
 	_settings_load()
@@ -48,14 +61,24 @@ func _ready() -> void:
 func apply_camera_settings() -> void:
 	var sensitivity := _settings_get_float("right_drag_yaw_sensitivity", 0.0035)
 	rotation_speed = sensitivity * 10000
+	
+	var old_camera_height: float = camera_height
+	var old_camera_distance: float = camera_distance
+	
 	camera_height = _settings_get_float("camera_height", camera_height)
 	camera_distance = _settings_get_float("camera_distance", camera_distance)
 	camera_angle_offset = _settings_get_float("camera_angle_offset", camera_angle_offset)
 	camera_drag_enabled = _settings_get_bool("camera_drag_enabled", camera_drag_enabled)
 	camera_drag_sensitivity = _settings_get_float("camera_drag_sensitivity", camera_drag_sensitivity)
+	
+	if old_camera_height != camera_height or old_camera_distance != camera_distance:
+		_geometry_cache_valid = false
+		_angle_cache_valid = false
 
 func refresh_camera_from_settings() -> void:
 	apply_camera_settings()
+	_angle_cache_valid = false
+	_last_angle = camera_angle_offset
 	_update_camera_follow()
 
 func _settings_node() -> Node:
@@ -92,15 +115,8 @@ func _settings_get_bool(property_name: String, fallback: bool) -> bool:
 	return fallback
 
 func _physics_process(delta: float) -> void:
+	_raycast_timer += delta
 	_update_sprint_state()
-	_update_sprint_fov(delta)
-	_update_camera_drag()
-	_update_character_rotation_toward_mouse(delta)
-	_handle_vertical_motion(delta)
-	_handle_movement(delta)
-	_update_camera_follow()
-	_update_destruction(delta)
-	move_and_slide()
 	_update_sprint_fov(delta)
 	_update_camera_drag()
 	_update_character_rotation_toward_mouse(delta)
@@ -144,7 +160,11 @@ func _update_camera_drag() -> void:
 	var screen_width := viewport.get_visible_rect().size.x
 	
 	var relative := Input.get_last_mouse_velocity()
-	camera_angle_offset -= relative.x * camera_drag_sensitivity * 0.001
+	var angle_change := relative.x * camera_drag_sensitivity * camera_drag_sensitivity * 0.0000005
+	camera_angle_offset -= angle_change
+	
+	if abs(angle_change) > 0.1:
+		_angle_cache_valid = false
 	
 	camera_angle_offset = fmod(camera_angle_offset, 360.0)
 	if camera_angle_offset < 0:
@@ -160,15 +180,6 @@ func _input(event: InputEvent) -> void:
 			is_dragging_camera = event.pressed
 			if not is_dragging_camera:
 				_save_camera_angle()
-	
-	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_TAB:
-			_toggle_inventory()
-		if event.keycode == KEY_F3:
-			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
-		if event.keycode == KEY_G:
-			_toggle_debug_collision()
-			_toggle_debug_collision()
 	
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_TAB:
@@ -258,8 +269,7 @@ func _handle_movement(delta: float) -> void:
 	if input_vector.length() > 0.0:
 		input_vector = input_vector.normalized()
 		
-		var angle_rad := deg_to_rad(camera_angle_offset)
-		var backward := Vector3(sin(angle_rad), 0, cos(angle_rad))
+		var backward := Vector3(_sin_angle, 0, _cos_angle)
 		var forward_dir := -backward
 		
 		var right_dir := -forward_dir.rotated(Vector3.UP, PI/2)
@@ -283,23 +293,45 @@ func _handle_vertical_motion(delta: float) -> void:
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = jump_velocity
 
-	if Input.is_action_pressed("jump") and is_on_floor():
-		velocity.y = jump_velocity
-
 func _update_camera_follow() -> void:
 	if not camera:
 		return
 
-	var tilt_rad := deg_to_rad(camera_height)
-	var angle_rad := deg_to_rad(camera_angle_offset)
+	if not _geometry_cache_valid:
+		_tilt_cached = deg_to_rad(camera_height)
+		_horizontal_radius_cached = camera_distance * sin(_tilt_cached)
+		_height_cached = camera_distance * cos(_tilt_cached)
+		_geometry_cache_valid = true
+		_angle_cache_valid = false
 
-	var horizontal_radius := camera_distance * sin(tilt_rad)
-	var height := camera_distance * cos(tilt_rad)
+	var current_angle: float = camera_angle_offset
+	var angle_diff: float = current_angle - _last_angle
+	
+	if not _angle_cache_valid:
+		_sin_angle = sin(current_angle)
+		_cos_angle = cos(current_angle)
+		_angle_cache_valid = true
+	else:
+		var angle_delta: float = fmod(angle_diff, TAU)
+		if angle_delta > PI:
+			angle_delta -= TAU
+		elif angle_delta < -PI:
+			angle_delta += TAU
+		
+		if abs(angle_delta) > 0.001:
+			var sin_delta: float = sin(angle_delta)
+			var cos_delta: float = cos(angle_delta)
+			var new_sin: float = _sin_angle * cos_delta + _cos_angle * sin_delta
+			var new_cos: float = _cos_angle * cos_delta - _sin_angle * sin_delta
+			_sin_angle = new_sin
+			_cos_angle = new_cos
+	
+	_last_angle = current_angle
 
-	var x := horizontal_radius * sin(angle_rad)
-	var z := horizontal_radius * cos(angle_rad)
+	var x: float = _horizontal_radius_cached * _sin_angle
+	var z: float = _horizontal_radius_cached * _cos_angle
 
-	camera.global_position = global_position + Vector3(x, height, z)
+	camera.global_position = global_position + Vector3(x, _height_cached, z)
 	camera.look_at(global_position + Vector3(0, 1.5, 0), Vector3.UP)
 	camera.current = true
 
@@ -325,6 +357,14 @@ func _check_destruction_target() -> void:
 		return
 	
 	var mouse_pos: Vector2 = get_viewport().get_mouse_position()
+	var mouse_delta := mouse_pos.distance_to(_last_raycast_pos)
+	
+	if mouse_delta < 10.0 and _raycast_timer < RAYCAST_INTERVAL:
+		return
+	
+	_last_raycast_pos = mouse_pos
+	_raycast_timer = 0.0
+	
 	var from: Vector3 = camera.project_ray_origin(mouse_pos)
 	var dir: Vector3 = camera.project_ray_normal(mouse_pos)
 	var to: Vector3 = from + dir * 10.0
