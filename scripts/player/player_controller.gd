@@ -256,7 +256,7 @@ func _update_character_rotation_toward_mouse(delta: float) -> void:
 	if look_direction.length_squared() < 0.001:
 		return
 	
-	var target_rotation := atan2(look_direction.x, look_direction.z)
+	var target_rotation := atan2(-look_direction.x, -look_direction.z)
 	rotation.y = lerp_angle(rotation.y, target_rotation, rotation_speed * delta)
 
 func _handle_movement(delta: float) -> void:
