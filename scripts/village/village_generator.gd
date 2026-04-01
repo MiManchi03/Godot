@@ -138,6 +138,7 @@ func _pick_village_scale(rng: RandomNumberGenerator) -> VillageScale:
 func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> Node3D:
 	var village := Node3D.new()
 	village.name = "Village"
+	var type_counts := {}
 
 	var footprint_radius := 10.0
 	var building_count := 6
@@ -161,6 +162,7 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		var building := _create_building_variant(rng, building_type)
 		if building == null:
 			continue
+		_tag_building_identity(building, building_type, type_counts)
 
 		building.position = local_pos
 		building.rotate_y(rng.randf_range(0.0, TAU))
@@ -313,6 +315,42 @@ func _building_type_name(building_type: BuildingType) -> String:
 			return "Barrack"
 		_:
 			return "Building"
+
+
+func _building_type_id(building_type: BuildingType) -> String:
+	match building_type:
+		BuildingType.HOUSE:
+			return "house"
+		BuildingType.WORKSHOP:
+			return "workshop"
+		BuildingType.WAREHOUSE:
+			return "warehouse"
+		BuildingType.MARKET:
+			return "market"
+		BuildingType.WELL:
+			return "well"
+		BuildingType.FARM:
+			return "farm"
+		BuildingType.TOWER:
+			return "tower"
+		BuildingType.BARRACK:
+			return "barrack"
+		_:
+			return ""
+
+
+func _tag_building_identity(building: Node3D, building_type: BuildingType, type_counts: Dictionary) -> void:
+	var type_name := _building_type_name(building_type)
+	var type_id := _building_type_id(building_type)
+	if type_id.is_empty():
+		return
+
+	var count := int(type_counts.get(type_id, 0)) + 1
+	type_counts[type_id] = count
+
+	building.name = "%s_%02d" % [type_name, count]
+	building.set_meta("build_id", type_id)
+	building.set_meta("build_type_name", type_name)
 
 
 func _create_house_variant(rng: RandomNumberGenerator) -> Node3D:

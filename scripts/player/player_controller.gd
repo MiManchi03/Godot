@@ -58,6 +58,20 @@ const CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX: float = 11.0
 const CAMERA_MOUSE_FOLLOW_BOTTOM_COMPENSATION_PX: float = 90.0
 const CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH: float = 5.0
 const CAMERA_MOUSE_FOLLOW_DOWN_NY_CAP: float = 0.8
+const BUILD_TRANSITION_TIME: float = 0.5
+const BUILD_CAMERA_HEIGHT_DEFAULT: float = 30.0
+const BUILD_CAMERA_HEIGHT_MIN: float = 3.0
+const BUILD_CAMERA_HEIGHT_MAX: float = 60.0
+const BUILD_CAMERA_ZOOM_MIN: float = 12.0
+const BUILD_CAMERA_ZOOM_MAX: float = 90.0
+const BUILD_ROTATE_STEP_DEGREES: float = 10.0
+const BUILD_ZOOM_WHEEL_STEP: float = 1.2
+const BUILD_ZOOM_BUTTON_STEP_SMALL: float = 1.0
+const BUILD_ZOOM_BUTTON_STEP_LARGE: float = 10.0
+const BUILD_DRAG_PAN_FACTOR: float = 0.035
+const BUILD_PICK_DOUBLE_CLICK_MS: int = 380
+const BUILD_PICK_DOUBLE_CLICK_DIST: float = 22.0
+const BUILD_PICK_DEBUG: bool = false
 
 var _destroy_ui_layer: CanvasLayer
 var _destroy_ui_panel: PanelContainer
@@ -67,12 +81,50 @@ var _destroy_ui_fast_timer: float = 0.0
 var _destroy_ui_hold_timer: float = 0.0
 var _destroy_ui_fast_mode: bool = false
 var _destroy_ui_target_type: String = ""
+var _build_mode: bool = false
+var _build_transition_tween: Tween
+var _build_camera_height: float = BUILD_CAMERA_HEIGHT_DEFAULT
+var _build_camera_zoom: float = 32.0
+var _build_camera_pan: Vector3 = Vector3.ZERO
+var _build_camera_target_position: Vector3 = Vector3.ZERO
+var _build_camera_rotation: float = 0.0
+var _build_drag_map: bool = false
+var _build_last_mouse: Vector2 = Vector2.ZERO
+var _build_last_left_click_ms: int = -100000
+var _build_last_left_click_pos: Vector2 = Vector2.ZERO
+var _build_ignore_place_until_ms: int = 0
+var _build_ui_layer: CanvasLayer
+var _build_ui_root: Control
+var _build_list_scroll: ScrollContainer
+var _build_zoom_slider: VSlider
+var _build_zoom_value_label: Label
+var _build_selected_id: String = ""
+var _build_buttons_by_id: Dictionary = {}
+var _build_preview_root: Node3D
+var _build_preview_rotation_deg: float = 0.0
+var _build_preview_valid: bool = false
+var _build_village_generator: VillageGenerator
+var _build_rng := RandomNumberGenerator.new()
+
+const BUILDING_DEFS := [
+	{"id": "house", "label": "房屋", "emoji": "🏠", "type": VillageGenerator.BuildingType.HOUSE},
+	{"id": "workshop", "label": "工坊", "emoji": "🔨", "type": VillageGenerator.BuildingType.WORKSHOP},
+	{"id": "warehouse", "label": "仓库", "emoji": "📦", "type": VillageGenerator.BuildingType.WAREHOUSE},
+	{"id": "market", "label": "市场", "emoji": "🏪", "type": VillageGenerator.BuildingType.MARKET},
+	{"id": "well", "label": "水井", "emoji": "🪣", "type": VillageGenerator.BuildingType.WELL},
+	{"id": "farm", "label": "农场", "emoji": "🌾", "type": VillageGenerator.BuildingType.FARM},
+	{"id": "tower", "label": "塔楼", "emoji": "🗼", "type": VillageGenerator.BuildingType.TOWER},
+	{"id": "barrack", "label": "兵营", "emoji": "⚔️", "type": VillageGenerator.BuildingType.BARRACK},
+]
 
 func _ready() -> void:
 	print("=== PLAYER SCRIPT LOADED ===")
 	_settings_load()
 	apply_camera_settings()
 	_setup_destroy_ui()
+	_setup_build_mode_ui()
+	_build_village_generator = VillageGenerator.new(base_seed())
+	_build_rng.seed = base_seed() ^ 0x88D1
 	
 	if camera:
 		camera.top_level = true
@@ -85,6 +137,110 @@ func _ready() -> void:
 	get_viewport().gui_release_focus()
 	get_viewport().grab_focus()
 	print("Mouse mode set to VISIBLE, focus grabbed")
+
+
+func base_seed() -> int:
+	return 4531
+
+
+func _setup_build_mode_ui() -> void:
+	_build_ui_layer = CanvasLayer.new()
+	_build_ui_layer.name = "BuildModeUI"
+	add_child(_build_ui_layer)
+
+	_build_ui_root = Control.new()
+	_build_ui_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_build_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_build_ui_root.visible = false
+	_build_ui_layer.add_child(_build_ui_root)
+
+	var bottom_panel := PanelContainer.new()
+	bottom_panel.anchor_left = 0.0
+	bottom_panel.anchor_top = 1.0
+	bottom_panel.anchor_right = 1.0
+	bottom_panel.anchor_bottom = 1.0
+	bottom_panel.offset_top = -120.0
+	bottom_panel.offset_bottom = 0.0
+	_build_ui_root.add_child(bottom_panel)
+
+	var bottom_vbox := VBoxContainer.new()
+	bottom_vbox.add_theme_constant_override("separation", 4)
+	bottom_panel.add_child(bottom_vbox)
+
+	var title := Label.new()
+	title.text = "建筑模式"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 18)
+	bottom_vbox.add_child(title)
+
+	_build_list_scroll = ScrollContainer.new()
+	_build_list_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_build_list_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_build_list_scroll.custom_minimum_size = Vector2(0, 84)
+	bottom_vbox.add_child(_build_list_scroll)
+
+	var list_hbox := HBoxContainer.new()
+	list_hbox.add_theme_constant_override("separation", 8)
+	_build_list_scroll.add_child(list_hbox)
+
+	for data in BUILDING_DEFS:
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(96, 74)
+		btn.text = "%s\n%s" % [str(data["emoji"]), str(data["label"])]
+		btn.set_meta("build_id", str(data["id"]))
+		btn.gui_input.connect(_on_building_button_input.bind(str(data["id"])))
+		_build_buttons_by_id[str(data["id"])] = btn
+		list_hbox.add_child(btn)
+	_refresh_build_button_highlight()
+
+	var right_panel := PanelContainer.new()
+	right_panel.anchor_left = 1.0
+	right_panel.anchor_top = 0.25
+	right_panel.anchor_right = 1.0
+	right_panel.anchor_bottom = 0.85
+	right_panel.offset_left = -110.0
+	right_panel.offset_right = -10.0
+	_build_ui_root.add_child(right_panel)
+
+	var right_vbox := VBoxContainer.new()
+	right_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	right_vbox.add_theme_constant_override("separation", 6)
+	right_panel.add_child(right_vbox)
+
+	var plus_plus := Button.new()
+	plus_plus.text = "++"
+	plus_plus.pressed.connect(_on_build_zoom_add_large)
+	right_vbox.add_child(plus_plus)
+
+	var plus := Button.new()
+	plus.text = "+"
+	plus.pressed.connect(_on_build_zoom_add_small)
+	right_vbox.add_child(plus)
+
+	_build_zoom_slider = VSlider.new()
+	_build_zoom_slider.min_value = BUILD_CAMERA_ZOOM_MIN
+	_build_zoom_slider.max_value = BUILD_CAMERA_ZOOM_MAX
+	_build_zoom_slider.step = 0.1
+	_build_zoom_slider.value = _build_camera_zoom
+	_build_zoom_slider.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_build_zoom_slider.custom_minimum_size = Vector2(28, 190)
+	_build_zoom_slider.value_changed.connect(_on_build_zoom_slider_changed)
+	right_vbox.add_child(_build_zoom_slider)
+
+	var minus := Button.new()
+	minus.text = "-"
+	minus.pressed.connect(_on_build_zoom_sub_small)
+	right_vbox.add_child(minus)
+
+	var minus_minus := Button.new()
+	minus_minus.text = "--"
+	minus_minus.pressed.connect(_on_build_zoom_sub_large)
+	right_vbox.add_child(minus_minus)
+
+	_build_zoom_value_label = Label.new()
+	_build_zoom_value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	right_vbox.add_child(_build_zoom_value_label)
+	_update_build_zoom_label()
 
 
 func _setup_destroy_ui() -> void:
@@ -284,6 +440,10 @@ func _settings_get_bool(property_name: String, fallback: bool) -> bool:
 	return fallback
 
 func _physics_process(delta: float) -> void:
+	if _build_mode:
+		_update_build_mode(delta)
+		return
+
 	_raycast_timer += delta
 	_update_sprint_state()
 	_update_sprint_fov(delta)
@@ -326,10 +486,6 @@ func _update_camera_drag() -> void:
 	if not is_dragging_camera or not camera_drag_enabled:
 		return
 	
-	var viewport := get_viewport()
-	var mouse_pos := viewport.get_mouse_position()
-	var screen_width := viewport.get_visible_rect().size.x
-	
 	var relative := Input.get_last_mouse_velocity()
 	var angle_change := relative.x * camera_drag_sensitivity * camera_drag_sensitivity * 0.0000005
 	camera_angle_offset -= angle_change
@@ -342,6 +498,15 @@ func _update_camera_drag() -> void:
 		camera_angle_offset += 360.0
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_B:
+		_toggle_build_mode()
+		get_viewport().set_input_as_handled()
+		return
+
+	if _build_mode:
+		_handle_build_mode_input(event)
+		return
+
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			is_destroying = event.pressed
@@ -396,6 +561,574 @@ func _toggle_inventory() -> void:
 	if inv_ui:
 		inv_ui.toggle()
 		Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+
+
+func _toggle_build_mode() -> void:
+	if _build_mode:
+		_exit_build_mode()
+	else:
+		_enter_build_mode()
+
+
+func _enter_build_mode() -> void:
+	_build_mode = true
+	is_destroying = false
+	cancel_destruction()
+	velocity = Vector3.ZERO
+	visible = false
+	_build_camera_height = clampf(BUILD_CAMERA_HEIGHT_DEFAULT, BUILD_CAMERA_HEIGHT_MIN, BUILD_CAMERA_HEIGHT_MAX)
+	_build_camera_target_position = global_position
+	_build_camera_pan = Vector3.ZERO
+	_build_camera_rotation = 0.0
+
+	var hotbar_ui := get_node_or_null("/root/World/HotbarUI")
+	if hotbar_ui:
+		hotbar_ui.visible = false
+
+	if _build_ui_root:
+		_build_ui_root.visible = true
+
+	if _build_zoom_slider:
+		_build_zoom_slider.set_value_no_signal(_build_camera_zoom)
+	_update_build_zoom_label()
+
+	if _build_transition_tween:
+		_build_transition_tween.kill()
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	_build_transition_tween = create_tween()
+	_build_transition_tween.set_trans(Tween.TRANS_SINE)
+	_build_transition_tween.set_ease(Tween.EASE_IN_OUT)
+	var target_pos := _build_camera_target_position + Vector3(0.0, _build_camera_height, 0.01)
+	_build_transition_tween.tween_property(camera, "global_position", target_pos, BUILD_TRANSITION_TIME)
+	_build_transition_tween.parallel().tween_property(camera, "size", _build_camera_zoom, BUILD_TRANSITION_TIME)
+	_build_transition_tween.parallel().tween_method(Callable(self, "_build_look_down_step"), 0.0, 1.0, BUILD_TRANSITION_TIME)
+
+
+func _exit_build_mode() -> void:
+	_build_mode = false
+	visible = true
+	_build_drag_map = false
+	_cancel_build_selection()
+
+	if _build_ui_root:
+		_build_ui_root.visible = false
+
+	var hotbar_ui := get_node_or_null("/root/World/HotbarUI")
+	if hotbar_ui:
+		hotbar_ui.visible = true
+
+	if _build_transition_tween:
+		_build_transition_tween.kill()
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	_build_transition_tween = create_tween()
+	_build_transition_tween.set_trans(Tween.TRANS_SINE)
+	_build_transition_tween.set_ease(Tween.EASE_IN_OUT)
+	var x: float = _horizontal_radius_cached * _sin_angle
+	var z: float = _horizontal_radius_cached * _cos_angle
+	var target_pos := global_position + Vector3(x, _height_cached, z)
+	_build_transition_tween.tween_property(camera, "global_position", target_pos, BUILD_TRANSITION_TIME)
+	_build_transition_tween.parallel().tween_property(camera, "size", _build_camera_zoom, BUILD_TRANSITION_TIME)
+	_build_transition_tween.parallel().tween_method(Callable(self, "_build_look_follow_step"), 0.0, 1.0, BUILD_TRANSITION_TIME)
+
+
+func _build_look_down_step(weight: float) -> void:
+	var look_target := _build_camera_target_position + _build_camera_pan
+	var from_pos := global_position + Vector3(_horizontal_radius_cached * _sin_angle, _height_cached, _horizontal_radius_cached * _cos_angle)
+	var to_pos := look_target + Vector3(0.0, _build_camera_height, 0.01)
+	camera.global_position = from_pos.lerp(to_pos, weight)
+	camera.look_at(look_target, Vector3.FORWARD)
+
+
+func _build_look_follow_step(_weight: float) -> void:
+	_update_camera_follow(0.0)
+
+
+func _update_build_mode(delta: float) -> void:
+	if not camera:
+		return
+
+	var look_target := _build_camera_target_position + _build_camera_pan
+	var desired_pos := look_target + Vector3(0.0, _build_camera_height, 0.01)
+	if _build_transition_tween and _build_transition_tween.is_running():
+		# Transition tween drives camera.
+		pass
+	else:
+		camera.global_position = camera.global_position.lerp(desired_pos, clampf(delta * 10.0, 0.0, 1.0))
+		camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+		camera.size = lerpf(camera.size, _build_camera_zoom, clampf(delta * 12.0, 0.0, 1.0))
+		camera.look_at(look_target, Vector3.FORWARD)
+
+	_update_build_preview()
+
+
+func _handle_build_mode_input(event: InputEvent) -> void:
+	var over_build_ui := _is_mouse_over_build_ui()
+	if event is InputEventMouseButton:
+		var mouse_event := event as InputEventMouseButton
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
+			return
+		if mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+			_build_drag_map = mouse_event.pressed and not over_build_ui
+			_build_last_mouse = mouse_event.position
+			return
+
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if Input.is_key_pressed(KEY_CTRL):
+				_set_build_zoom(_build_camera_zoom - BUILD_ZOOM_WHEEL_STEP)
+			else:
+				_build_preview_rotation_deg += BUILD_ROTATE_STEP_DEGREES
+			return
+
+		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if Input.is_key_pressed(KEY_CTRL):
+				_set_build_zoom(_build_camera_zoom + BUILD_ZOOM_WHEEL_STEP)
+			else:
+				_build_preview_rotation_deg -= BUILD_ROTATE_STEP_DEGREES
+			return
+
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed and not over_build_ui:
+			var now_ms := Time.get_ticks_msec()
+			if now_ms < _build_ignore_place_until_ms:
+				if BUILD_PICK_DEBUG:
+					print("[BUILD_PICK] ignore place due to cooldown")
+				return
+			var is_double_click := (
+				now_ms - _build_last_left_click_ms <= BUILD_PICK_DOUBLE_CLICK_MS
+				and mouse_event.position.distance_to(_build_last_left_click_pos) <= BUILD_PICK_DOUBLE_CLICK_DIST
+			)
+			if BUILD_PICK_DEBUG:
+				print("[BUILD_PICK] left click pos=", mouse_event.position, " dt=", now_ms - _build_last_left_click_ms, " is_double=", is_double_click)
+			_build_last_left_click_ms = now_ms
+			_build_last_left_click_pos = mouse_event.position
+
+			if is_double_click and _try_pick_existing_building_to_preview():
+				_build_ignore_place_until_ms = now_ms + 140
+				return
+			_try_place_building()
+			return
+
+	if event is InputEventMouseMotion:
+		if _build_drag_map:
+			var motion := event as InputEventMouseMotion
+			_build_camera_pan.x -= motion.relative.x * BUILD_DRAG_PAN_FACTOR
+			_build_camera_pan.z += motion.relative.y * BUILD_DRAG_PAN_FACTOR
+
+
+func _is_mouse_over_build_ui() -> bool:
+	if not _build_ui_root or not _build_ui_root.visible:
+		return false
+	var hovered := get_viewport().gui_get_hovered_control()
+	if hovered == null:
+		return false
+	if not _build_ui_root.is_ancestor_of(hovered):
+		return false
+	var current: Control = hovered
+	while current != null and current != _build_ui_root:
+		if current is BaseButton or current is Slider or current is ScrollContainer or current is ScrollBar:
+			return true
+		current = current.get_parent() as Control
+	return false
+
+
+func _set_build_zoom(value: float) -> void:
+	_build_camera_zoom = clampf(value, BUILD_CAMERA_ZOOM_MIN, BUILD_CAMERA_ZOOM_MAX)
+	if _build_zoom_slider:
+		_build_zoom_slider.set_value_no_signal(_build_camera_zoom)
+	_update_build_zoom_label()
+
+
+func _update_build_zoom_label() -> void:
+	if _build_zoom_value_label:
+		_build_zoom_value_label.text = "缩放 %.1f" % _build_camera_zoom
+
+
+func _on_build_zoom_add_large() -> void:
+	_set_build_zoom(_build_camera_zoom + BUILD_ZOOM_BUTTON_STEP_LARGE)
+
+
+func _on_build_zoom_add_small() -> void:
+	_set_build_zoom(_build_camera_zoom + BUILD_ZOOM_BUTTON_STEP_SMALL)
+
+
+func _on_build_zoom_sub_small() -> void:
+	_set_build_zoom(_build_camera_zoom - BUILD_ZOOM_BUTTON_STEP_SMALL)
+
+
+func _on_build_zoom_sub_large() -> void:
+	_set_build_zoom(_build_camera_zoom - BUILD_ZOOM_BUTTON_STEP_LARGE)
+
+
+func _on_build_zoom_slider_changed(value: float) -> void:
+	_build_camera_zoom = clampf(value, BUILD_CAMERA_ZOOM_MIN, BUILD_CAMERA_ZOOM_MAX)
+	_update_build_zoom_label()
+
+
+func _on_building_button_input(event: InputEvent, build_id: String) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	var mouse_event := event as InputEventMouseButton
+	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
+		return
+	if mouse_event.double_click:
+		_select_building(build_id)
+		return
+	if _build_selected_id == build_id and _build_preview_root != null:
+		_cancel_build_selection()
+	else:
+		_select_building(build_id)
+
+
+func _select_building(build_id: String) -> void:
+	_build_selected_id = build_id
+	_refresh_build_button_highlight()
+	_spawn_build_preview()
+
+
+func _cancel_build_selection() -> void:
+	if _build_preview_root:
+		_build_preview_root.queue_free()
+		_build_preview_root = null
+	_build_selected_id = ""
+	_refresh_build_button_highlight()
+
+
+func _refresh_build_button_highlight() -> void:
+	for id_key in _build_buttons_by_id.keys():
+		var btn: Button = _build_buttons_by_id[id_key] as Button
+		if btn == null:
+			continue
+		var is_selected := str(id_key) == _build_selected_id
+		_apply_build_button_style(btn, is_selected)
+
+
+func _apply_build_button_style(btn: Button, is_selected: bool) -> void:
+	var style := StyleBoxFlat.new()
+	style.set_corner_radius_all(8)
+	style.content_margin_left = 8
+	style.content_margin_right = 8
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
+
+	if is_selected:
+		style.bg_color = Color(0.95, 0.74, 0.26, 1.0)
+		style.border_width_left = 3
+		style.border_width_top = 3
+		style.border_width_right = 3
+		style.border_width_bottom = 3
+		style.border_color = Color(1.0, 0.95, 0.72, 1.0)
+		btn.add_theme_color_override("font_color", Color(0.16, 0.11, 0.02, 1.0))
+		btn.add_theme_color_override("font_hover_color", Color(0.16, 0.11, 0.02, 1.0))
+		btn.add_theme_color_override("font_pressed_color", Color(0.16, 0.11, 0.02, 1.0))
+	else:
+		style.bg_color = Color(0.17, 0.19, 0.23, 0.96)
+		style.border_width_left = 1
+		style.border_width_top = 1
+		style.border_width_right = 1
+		style.border_width_bottom = 1
+		style.border_color = Color(0.36, 0.39, 0.45, 1.0)
+		btn.add_theme_color_override("font_color", Color(0.92, 0.93, 0.95, 1.0))
+		btn.add_theme_color_override("font_hover_color", Color(0.96, 0.97, 1.0, 1.0))
+		btn.add_theme_color_override("font_pressed_color", Color(0.84, 0.86, 0.9, 1.0))
+
+	btn.add_theme_stylebox_override("normal", style)
+	btn.add_theme_stylebox_override("hover", style)
+	btn.add_theme_stylebox_override("pressed", style)
+	btn.add_theme_stylebox_override("focus", style)
+	btn.add_theme_stylebox_override("disabled", style)
+
+
+func _spawn_build_preview() -> void:
+	if _build_preview_root:
+		_build_preview_root.queue_free()
+		_build_preview_root = null
+
+	if _build_selected_id.is_empty():
+		return
+
+	var type := _building_type_from_id(_build_selected_id)
+	if type == -1:
+		return
+
+	var preview := _build_village_generator._create_building_variant(_build_rng, type)
+	if preview == null:
+		return
+
+	preview.name = "BuildPreview"
+	preview.set_meta("build_id", _build_selected_id)
+	get_parent().add_child(preview)
+	_build_preview_root = preview
+	_build_preview_rotation_deg = 0.0
+
+
+func _building_type_from_id(build_id: String) -> int:
+	for data in BUILDING_DEFS:
+		if str(data["id"]) == build_id:
+			return int(data["type"])
+	return -1
+
+
+func _resolve_build_id(node3d: Node3D) -> String:
+	if node3d.has_meta("build_id"):
+		return str(node3d.get_meta("build_id"))
+	return _build_id_from_node_name(node3d.name)
+
+
+func _build_id_from_node_name(node_name: String) -> String:
+	var lower := node_name.to_lower()
+	if lower.find("warehouse") != -1:
+		return "warehouse"
+	if lower.find("house") != -1:
+		return "house"
+	if lower.find("workshop") != -1:
+		return "workshop"
+	if lower.find("market") != -1:
+		return "market"
+	if lower.find("well") != -1:
+		return "well"
+	if lower.find("farm") != -1:
+		return "farm"
+	if lower.find("tower") != -1:
+		return "tower"
+	if lower.find("barrack") != -1:
+		return "barrack"
+
+	match node_name:
+		"House":
+			return "house"
+		"Workshop":
+			return "workshop"
+		"Warehouse":
+			return "warehouse"
+		"Market":
+			return "market"
+		"Well":
+			return "well"
+		"Farm", "FarmPlot":
+			return "farm"
+		"Tower":
+			return "tower"
+		"Barrack", "Barracks":
+			return "barrack"
+		_:
+			return ""
+
+
+func _find_building_root_from_collider(collider: Object) -> Node3D:
+	if not (collider is Node):
+		return null
+	var current: Node = collider as Node
+	while current != null:
+		if current is Node3D:
+			var build_id := _resolve_build_id(current as Node3D)
+			if not build_id.is_empty():
+				return current as Node3D
+		current = current.get_parent()
+	return null
+
+
+func _collect_building_roots(node: Node, out: Array[Node3D]) -> void:
+	if node is Node3D:
+		var node3d := node as Node3D
+		if node3d != _build_preview_root:
+			var build_id := _resolve_build_id(node3d)
+			if not build_id.is_empty():
+				out.append(node3d)
+	for child in node.get_children():
+		_collect_building_roots(child, out)
+
+
+func _find_building_root_by_screen_proximity(mouse_pos: Vector2, max_px: float) -> Node3D:
+	if not camera:
+		return null
+	var world_root := get_node_or_null("/root/World")
+	if world_root == null:
+		return null
+	var candidates: Array[Node3D] = []
+	_collect_building_roots(world_root, candidates)
+	var best: Node3D = null
+	var best_d2 := max_px * max_px
+	for b in candidates:
+		var screen_pos := camera.unproject_position(b.global_position)
+		var d2 := screen_pos.distance_squared_to(mouse_pos)
+		if d2 <= best_d2:
+			best_d2 = d2
+			best = b
+	return best
+
+
+func _find_nearest_building_root(world_pos: Vector3, radius: float) -> Node3D:
+	var world_root := get_node_or_null("/root/World")
+	if world_root == null:
+		return null
+	var candidates: Array[Node3D] = []
+	_collect_building_roots(world_root, candidates)
+	var best: Node3D = null
+	var best_dist := radius * radius
+	for b in candidates:
+		var d2 := b.global_position.distance_squared_to(world_pos)
+		if d2 <= best_dist:
+			best_dist = d2
+			best = b
+	return best
+
+
+func _try_pick_existing_building_to_preview() -> bool:
+	if not camera:
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] fail: camera missing")
+		return false
+	var viewport := get_viewport()
+	var mouse_pos := viewport.get_mouse_position()
+	var origin := camera.project_ray_origin(mouse_pos)
+	var direction := camera.project_ray_normal(mouse_pos)
+	if BUILD_PICK_DEBUG:
+		print("[BUILD_PICK] try pick at mouse=", mouse_pos, " origin=", origin, " dir=", direction)
+	var ray := PhysicsRayQueryParameters3D.create(origin, origin + direction * 500.0)
+	ray.collide_with_areas = false
+	ray.collide_with_bodies = true
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	var building_root: Node3D = null
+	if not hit.is_empty():
+		var collider = hit.get("collider")
+		if BUILD_PICK_DEBUG:
+			if collider is Node:
+				var collider_node := collider as Node
+				print("[BUILD_PICK] ray hit collider=", collider_node.name, " path=", collider_node.get_path())
+			else:
+				print("[BUILD_PICK] ray hit non-node collider=", collider)
+		building_root = _find_building_root_from_collider(collider)
+		if building_root == null:
+			var hit_pos: Vector3 = hit.get("position", Vector3.ZERO)
+			if BUILD_PICK_DEBUG:
+				print("[BUILD_PICK] no root from collider, nearest by hit pos=", hit_pos)
+			building_root = _find_nearest_building_root(hit_pos, 5.0)
+	else:
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] ray miss")
+		if absf(direction.y) > 0.0001:
+			var t := -origin.y / direction.y
+			if t > 0.0:
+				var ground_pos := origin + direction * t
+				if BUILD_PICK_DEBUG:
+					print("[BUILD_PICK] nearest by ground pos=", ground_pos)
+				building_root = _find_nearest_building_root(ground_pos, 5.0)
+
+	if building_root == null:
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] no root from ray/nearest, trying screen proximity")
+		building_root = _find_building_root_by_screen_proximity(mouse_pos, 90.0)
+	if building_root == null:
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] fail: no building root found")
+		return false
+	if BUILD_PICK_DEBUG:
+		print("[BUILD_PICK] building root=", building_root.name, " path=", building_root.get_path())
+	var build_id := _resolve_build_id(building_root)
+	if build_id.is_empty():
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] fail: unresolved build id for root=", building_root.name)
+		return false
+	if BUILD_PICK_DEBUG:
+		print("[BUILD_PICK] resolved build_id=", build_id)
+
+	var picked_pos := building_root.global_position
+	var picked_rot := building_root.rotation.y
+	building_root.queue_free()
+	_select_building(build_id)
+	if _build_preview_root:
+		_build_preview_root.global_position = picked_pos
+		_build_preview_rotation_deg = rad_to_deg(picked_rot)
+		_build_preview_root.rotation.y = picked_rot
+		if BUILD_PICK_DEBUG:
+			print("[BUILD_PICK] success: picked and converted to preview")
+		return true
+	if BUILD_PICK_DEBUG:
+		print("[BUILD_PICK] fail: preview root missing after select")
+	return false
+
+
+func _mouse_ground_position() -> Vector3:
+	var viewport := get_viewport()
+	var mouse_pos := viewport.get_mouse_position()
+	var origin := camera.project_ray_origin(mouse_pos)
+	var dir := camera.project_ray_normal(mouse_pos)
+	if absf(dir.y) < 0.0001:
+		return Vector3.ZERO
+	var t := -origin.y / dir.y
+	if t <= 0.0:
+		return Vector3.ZERO
+	return origin + dir * t
+
+
+func _set_preview_tint(node: Node, color: Color) -> void:
+	if node is MeshInstance3D:
+		var mesh_instance := node as MeshInstance3D
+		var overlay := StandardMaterial3D.new()
+		overlay.albedo_color = color
+		overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mesh_instance.material_overlay = overlay
+	for child in node.get_children():
+		_set_preview_tint(child, color)
+
+
+func _preview_overlaps() -> bool:
+	if not _build_preview_root:
+		return true
+	var state := get_world_3d().direct_space_state
+	var q := PhysicsShapeQueryParameters3D.new()
+	for child in _build_preview_root.get_children():
+		if child is StaticBody3D:
+			var body := child as StaticBody3D
+			for shape_child in body.get_children():
+				if shape_child is CollisionShape3D:
+					var col := shape_child as CollisionShape3D
+					if col.shape == null:
+						continue
+					q.shape = col.shape
+					q.transform = body.global_transform * Transform3D(Basis.IDENTITY, col.position)
+					q.collide_with_areas = false
+					q.collide_with_bodies = true
+					var hits := state.intersect_shape(q, 4)
+					for hit in hits:
+						var collider = hit.get("collider")
+						if collider == null:
+							continue
+						if _build_preview_root.is_ancestor_of(collider):
+							continue
+						if collider is Node and (collider as Node).name == "Ground":
+							continue
+						return true
+	return false
+
+
+func _update_build_preview() -> void:
+	if not _build_preview_root:
+		return
+	var pos := _mouse_ground_position()
+	_build_preview_root.global_position = pos
+	_build_preview_root.rotation.y = deg_to_rad(_build_preview_rotation_deg)
+	var invalid := _preview_overlaps()
+	_build_preview_valid = not invalid
+	_set_preview_tint(_build_preview_root, Color(0.9, 0.2, 0.2, 0.7) if invalid else Color(0.5, 1.0, 0.5, 0.8))
+
+
+func _try_place_building() -> void:
+	if not _build_preview_root or not _build_preview_valid:
+		return
+	var type := _building_type_from_id(_build_selected_id)
+	if type == -1:
+		return
+	var placed := _build_village_generator._create_building_variant(_build_rng, type)
+	if placed == null:
+		return
+	placed.set_meta("build_id", _build_selected_id)
+	placed.global_position = _build_preview_root.global_position
+	placed.rotation.y = _build_preview_root.rotation.y
+	get_parent().add_child(placed)
+
+	# Place once, then clear current selection/preview.
+	_cancel_build_selection()
 
 
 func _save_camera_angle() -> void:
