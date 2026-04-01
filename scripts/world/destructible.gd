@@ -38,7 +38,10 @@ func update_destruction(delta: float) -> float:
 func complete_destruction() -> void:
 	is_being_destroyed = false
 	destroyed.emit(get_drops())
-	queue_free()
+	if name == "DestructibleArea" and get_parent() != null:
+		get_parent().queue_free()
+	else:
+		queue_free()
 
 
 func cancel_destruction() -> void:

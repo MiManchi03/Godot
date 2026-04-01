@@ -9,7 +9,8 @@ const ITEM_DEFS := {
 	"stick": {"name": "树枝", "emoji": "🌿"},
 	"leaves": {"name": "树叶", "emoji": "🍃"},
 	"stone": {"name": "石头", "emoji": "🪨"},
-	"wheat_seed": {"name": "小麦种子", "emoji": "🌾"}
+	"wheat_seed": {"name": "小麦种子", "emoji": "🌾"},
+	"wheat": {"name": "小麦", "emoji": "🌾", "icon": "res://assets/icons/wheat.svg"}
 }
 
 var inventory: Array = []

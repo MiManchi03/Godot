@@ -191,7 +191,14 @@ func _create_grass() -> Area3D:
 	root.set_script(DestructibleScript)
 	root.destruct_type = "grass"
 	root.destroy_time = 0.0
-	root.drops = {}
+	root.drops = {"wheat": 1}
+
+	var area_collision := CollisionShape3D.new()
+	var area_shape := BoxShape3D.new()
+	area_shape.size = Vector3(0.2, 0.6, 0.2)
+	area_collision.shape = area_shape
+	area_collision.position = Vector3(0.0, 0.3, 0.0)
+	root.add_child(area_collision)
 
 	var blade := MeshInstance3D.new()
 	var blade_mesh := BoxMesh.new()

@@ -115,6 +115,13 @@ func _create_slot(index: int, is_hotbar: bool) -> PanelContainer:
 	icon_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	icon_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	icon_label.add_theme_font_size_override("font_size", 28)
+	var icon_tex := TextureRect.new()
+	icon_tex.name = "IconTex"
+	icon_tex.custom_minimum_size = Vector2(28, 28)
+	icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon_tex.visible = false
+	vbox.add_child(icon_tex)
 	vbox.add_child(icon_label)
 	
 	var count_label := Label.new()
@@ -151,14 +158,25 @@ func _update_display() -> void:
 func _update_slot(slot: PanelContainer, item: Dictionary, is_selected: bool = false) -> void:
 	var vbox: VBoxContainer = slot.get_child(0) as VBoxContainer
 	var icon_label: Label = vbox.get_node("Icon") as Label
+	var icon_tex: TextureRect = vbox.get_node("IconTex") as TextureRect
 	var count_label: Label = vbox.get_node("Count") as Label
 	
 	if item.is_empty():
 		icon_label.text = ""
+		icon_tex.texture = null
+		icon_tex.visible = false
 		count_label.text = ""
 	else:
 		var item_def: Dictionary = inv_manager.get_item_def(item["id"])
-		icon_label.text = item_def["emoji"]
+		var icon_path := str(item_def.get("icon", ""))
+		if not icon_path.is_empty() and ResourceLoader.exists(icon_path):
+			icon_tex.texture = load(icon_path)
+			icon_tex.visible = true
+			icon_label.text = ""
+		else:
+			icon_tex.texture = null
+			icon_tex.visible = false
+			icon_label.text = str(item_def.get("emoji", "❓"))
 		if item["count"] > 1:
 			count_label.text = str(item["count"])
 		else:

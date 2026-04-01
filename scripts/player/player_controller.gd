@@ -402,13 +402,8 @@ func _complete_destruction() -> void:
 		return
 	
 	var drops: Dictionary = current_target.get_drops()
-	
-	if current_target.destruct_type == "grass":
-		if randf() < 0.3:
-			InventoryManager.add_item("wheat_seed", 1)
-	else:
-		for item_id in drops.keys():
-			InventoryManager.add_item(item_id, drops[item_id])
+	for item_id in drops.keys():
+		InventoryManager.add_item(item_id, drops[item_id])
 	
 	current_target.complete_destruction()
 	current_target = null
