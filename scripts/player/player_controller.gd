@@ -40,11 +40,26 @@ var _geometry_cache_valid: bool = false
 var _last_raycast_pos: Vector2 = Vector2.ZERO
 var _raycast_timer: float = 0.0
 const RAYCAST_INTERVAL: float = 0.1
+const DESTROY_UI_FAST_TIME: float = 0.08
+const DESTROY_UI_COMPLETE_HOLD: float = 0.12
+const DESTROY_UI_WIDTH: float = 380.0
+const DESTROY_UI_HEIGHT: float = 40.0
+const DESTROY_UI_TOP_OFFSET_Y: float = 12.0
+
+var _destroy_ui_layer: CanvasLayer
+var _destroy_ui_panel: PanelContainer
+var _destroy_ui_label: Label
+var _destroy_ui_bar: ProgressBar
+var _destroy_ui_fast_timer: float = 0.0
+var _destroy_ui_hold_timer: float = 0.0
+var _destroy_ui_fast_mode: bool = false
+var _destroy_ui_target_type: String = ""
 
 func _ready() -> void:
 	print("=== PLAYER SCRIPT LOADED ===")
 	_settings_load()
 	apply_camera_settings()
+	_setup_destroy_ui()
 	
 	if camera:
 		camera.top_level = true
@@ -57,6 +72,144 @@ func _ready() -> void:
 	get_viewport().gui_release_focus()
 	get_viewport().grab_focus()
 	print("Mouse mode set to VISIBLE, focus grabbed")
+
+
+func _setup_destroy_ui() -> void:
+	_destroy_ui_layer = CanvasLayer.new()
+	_destroy_ui_layer.name = "DestructionUI"
+	add_child(_destroy_ui_layer)
+
+	_destroy_ui_panel = PanelContainer.new()
+	_destroy_ui_panel.visible = false
+	_destroy_ui_panel.modulate = Color(1, 1, 1, 1)
+	_destroy_ui_panel.anchor_left = 0.5
+	_destroy_ui_panel.anchor_top = 0.0
+	_destroy_ui_panel.anchor_right = 0.5
+	_destroy_ui_panel.anchor_bottom = 0.0
+	_layout_destroy_ui()
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.08, 0.1, 0.09, 0.88)
+	panel_style.border_width_left = 2
+	panel_style.border_width_top = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_bottom = 2
+	panel_style.border_color = Color(0.58, 0.48, 0.24, 0.95)
+	panel_style.corner_radius_top_left = 0
+	panel_style.corner_radius_top_right = 0
+	panel_style.corner_radius_bottom_left = 0
+	panel_style.corner_radius_bottom_right = 0
+	_destroy_ui_panel.add_theme_stylebox_override("panel", panel_style)
+	_destroy_ui_layer.add_child(_destroy_ui_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 4)
+	_destroy_ui_panel.add_child(vbox)
+
+	_destroy_ui_label = Label.new()
+	_destroy_ui_label.text = ""
+	_destroy_ui_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_destroy_ui_label.add_theme_font_size_override("font_size", 15)
+	vbox.add_child(_destroy_ui_label)
+
+	_destroy_ui_bar = ProgressBar.new()
+	_destroy_ui_bar.min_value = 0.0
+	_destroy_ui_bar.max_value = 1.0
+	_destroy_ui_bar.value = 0.0
+	_destroy_ui_bar.show_percentage = false
+	_destroy_ui_bar.custom_minimum_size = Vector2(340, 20)
+	var bar_bg_style := StyleBoxFlat.new()
+	bar_bg_style.bg_color = Color(0.12, 0.14, 0.13, 0.95)
+	bar_bg_style.corner_radius_top_left = 0
+	bar_bg_style.corner_radius_top_right = 0
+	bar_bg_style.corner_radius_bottom_left = 0
+	bar_bg_style.corner_radius_bottom_right = 0
+	bar_bg_style.border_width_left = 1
+	bar_bg_style.border_width_top = 1
+	bar_bg_style.border_width_right = 1
+	bar_bg_style.border_width_bottom = 1
+	bar_bg_style.border_color = Color(0.42, 0.34, 0.16, 0.95)
+	_destroy_ui_bar.add_theme_stylebox_override("background", bar_bg_style)
+	var bar_fill_style := StyleBoxFlat.new()
+	bar_fill_style.bg_color = Color(0.86, 0.66, 0.21, 0.98)
+	bar_fill_style.corner_radius_top_left = 0
+	bar_fill_style.corner_radius_top_right = 0
+	bar_fill_style.corner_radius_bottom_left = 0
+	bar_fill_style.corner_radius_bottom_right = 0
+	_destroy_ui_bar.add_theme_stylebox_override("fill", bar_fill_style)
+	vbox.add_child(_destroy_ui_bar)
+
+
+func _layout_destroy_ui() -> void:
+	if not _destroy_ui_panel:
+		return
+	_destroy_ui_panel.offset_left = -DESTROY_UI_WIDTH * 0.5
+	_destroy_ui_panel.offset_right = DESTROY_UI_WIDTH * 0.5
+	_destroy_ui_panel.offset_top = DESTROY_UI_TOP_OFFSET_Y
+	_destroy_ui_panel.offset_bottom = DESTROY_UI_TOP_OFFSET_Y + DESTROY_UI_HEIGHT
+
+
+func _show_destroy_ui(target_type: String) -> void:
+	if not _destroy_ui_panel:
+		return
+	_destroy_ui_target_type = target_type
+	_destroy_ui_label.text = "正在破坏 %s  0%%" % _destruct_type_to_name(target_type)
+	_destroy_ui_panel.visible = true
+
+
+func _hide_destroy_ui() -> void:
+	if not _destroy_ui_panel:
+		return
+	_destroy_ui_panel.visible = false
+	_destroy_ui_bar.value = 0.0
+	_destroy_ui_label.text = ""
+	_destroy_ui_fast_mode = false
+	_destroy_ui_fast_timer = 0.0
+	_destroy_ui_hold_timer = 0.0
+	_destroy_ui_target_type = ""
+
+
+func _destruct_type_to_name(target_type: String) -> String:
+	match target_type:
+		"tree":
+			return "树"
+		"stone":
+			return "石头"
+		"grass":
+			return "草"
+		_:
+			return target_type
+
+
+func _start_fast_destroy_ui(target_type: String) -> void:
+	_show_destroy_ui(target_type)
+	_destroy_ui_bar.value = 0.0
+	_destroy_ui_fast_timer = 0.0
+	_destroy_ui_hold_timer = 0.0
+	_destroy_ui_fast_mode = true
+
+
+func _update_destroy_ui_timers(delta: float) -> void:
+	if not _destroy_ui_panel or not _destroy_ui_panel.visible:
+		return
+
+	var pulse := 0.92 + 0.08 * sin(Time.get_ticks_msec() * 0.01)
+	_destroy_ui_panel.modulate = Color(1.0, 1.0, 1.0, pulse)
+
+	if _destroy_ui_fast_mode:
+		_destroy_ui_fast_timer += delta
+		var t := clampf(_destroy_ui_fast_timer / DESTROY_UI_FAST_TIME, 0.0, 1.0)
+		_destroy_ui_bar.value = t
+		_destroy_ui_label.text = "正在破坏 %s  %d%%" % [_destruct_type_to_name(_destroy_ui_target_type), int(round(t * 100.0))]
+		if t >= 1.0:
+			_destroy_ui_fast_mode = false
+			_destroy_ui_hold_timer = DESTROY_UI_COMPLETE_HOLD
+		return
+
+	if _destroy_ui_hold_timer > 0.0:
+		_destroy_ui_hold_timer -= delta
+		if _destroy_ui_hold_timer <= 0.0:
+			_hide_destroy_ui()
 
 func apply_camera_settings() -> void:
 	var sensitivity := _settings_get_float("right_drag_yaw_sensitivity", 0.0035)
@@ -124,6 +277,7 @@ func _physics_process(delta: float) -> void:
 	_handle_movement(delta)
 	_update_camera_follow()
 	_update_destruction(delta)
+	_update_destroy_ui_timers(delta)
 	move_and_slide()
 
 func _update_sprint_state() -> void:
@@ -142,6 +296,7 @@ func _update_sprint_state() -> void:
 func _update_sprint_fov(delta: float) -> void:
 	if not camera:
 		return
+	_layout_destroy_ui()
 
 	var target_fov: float = base_camera_fov
 	if is_sprinting and Input.is_action_pressed("move_forward"):
@@ -342,12 +497,22 @@ func _update_destruction(delta: float) -> void:
 			current_target.cancel_destruction()
 			current_target = null
 		destroy_progress = 0.0
+		if not _destroy_ui_fast_mode and _destroy_ui_hold_timer <= 0.0:
+			_hide_destroy_ui()
 		return
 	
 	_check_destruction_target()
 	
 	if current_target:
 		destroy_progress = current_target.update_destruction(delta)
+		var target_type := current_target.destruct_type
+		if current_target.get_destroy_time() <= 0.0:
+			if not _destroy_ui_fast_mode and _destroy_ui_hold_timer <= 0.0:
+				_start_fast_destroy_ui(target_type)
+		else:
+			_show_destroy_ui(target_type)
+			_destroy_ui_bar.value = clampf(destroy_progress, 0.0, 1.0)
+			_destroy_ui_label.text = "正在破坏 %s  %d%%" % [_destruct_type_to_name(target_type), int(round(_destroy_ui_bar.value * 100.0))]
 		if destroy_progress >= 1.0:
 			_complete_destruction()
 
@@ -395,6 +560,8 @@ func _check_destruction_target() -> void:
 	if current_target:
 		current_target.cancel_destruction()
 		current_target = null
+	if not _destroy_ui_fast_mode and _destroy_ui_hold_timer <= 0.0:
+		_hide_destroy_ui()
 
 
 func _complete_destruction() -> void:
@@ -402,8 +569,15 @@ func _complete_destruction() -> void:
 		return
 	
 	var drops: Dictionary = current_target.get_drops()
+	var destroyed_time := current_target.get_destroy_time()
 	for item_id in drops.keys():
 		InventoryManager.add_item(item_id, drops[item_id])
+
+	if destroyed_time > 0.0:
+		_show_destroy_ui(current_target.destruct_type)
+		_destroy_ui_bar.value = 1.0
+		_destroy_ui_label.text = "正在破坏 %s  100%%" % _destruct_type_to_name(current_target.destruct_type)
+		_destroy_ui_hold_timer = DESTROY_UI_COMPLETE_HOLD
 	
 	current_target.complete_destruction()
 	current_target = null
@@ -416,3 +590,5 @@ func cancel_destruction() -> void:
 		current_target.cancel_destruction()
 		current_target = null
 	destroy_progress = 0.0
+	if not _destroy_ui_fast_mode and _destroy_ui_hold_timer <= 0.0:
+		_hide_destroy_ui()
