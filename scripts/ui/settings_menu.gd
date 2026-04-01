@@ -10,8 +10,23 @@ extends CanvasLayer
 @onready var camera_tilt_value: Label = $Panel/MarginContainer/VBoxContainer/CameraTiltRow/CameraTiltValue
 @onready var camera_distance_slider: HSlider = $Panel/MarginContainer/VBoxContainer/CameraDistanceRow/CameraDistanceSlider
 @onready var camera_distance_value: Label = $Panel/MarginContainer/VBoxContainer/CameraDistanceRow/CameraDistanceValue
+@onready var camera_mouse_follow_enabled_checkbox: CheckButton = $Panel/MarginContainer/VBoxContainer/CameraMouseFollowEnabledCheckBox
+@onready var camera_mouse_follow_strength_slider: HSlider = $Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/CameraMouseFollowStrengthSlider
+@onready var camera_mouse_follow_strength_value: Label = $Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/CameraMouseFollowStrengthValue
 
 var player: CharacterBody3D
+var _is_initializing_controls: bool = false
+
+
+func _apply_player_settings(update_camera_view: bool) -> void:
+	if not player:
+		return
+	if update_camera_view:
+		if player.has_method("refresh_camera_from_settings"):
+			player.call("refresh_camera_from_settings")
+	else:
+		if player.has_method("apply_camera_settings"):
+			player.call("apply_camera_settings")
 
 
 func _ready() -> void:
@@ -19,6 +34,7 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	_settings_load()
 	player = get_parent().get_node_or_null("Player")
+	_is_initializing_controls = true
 
 	right_drag_yaw_slider.min_value = 10.0
 	right_drag_yaw_slider.max_value = 200.0
@@ -39,16 +55,26 @@ func _ready() -> void:
 	camera_tilt_slider.min_value = 1.0
 	camera_tilt_slider.max_value = 80.0
 	camera_tilt_slider.step = 0.1
-	camera_tilt_slider.value = 2.0
+	camera_tilt_slider.value = _settings_get_float("camera_height", 26.0)
 	_on_camera_tilt_slider_value_changed(camera_tilt_slider.value)
 
 	camera_distance_slider.min_value = 3.0
 	camera_distance_slider.max_value = 20.0
 	camera_distance_slider.step = 0.1
-	camera_distance_slider.value = 10.0
+	camera_distance_slider.value = _settings_get_float("camera_distance", 8.5)
 	_on_camera_distance_slider_value_changed(camera_distance_slider.value)
 
+	var mouse_follow_enabled := _settings_get_bool("camera_mouse_follow_enabled", true)
+	camera_mouse_follow_enabled_checkbox.button_pressed = mouse_follow_enabled
+
+	camera_mouse_follow_strength_slider.min_value = 0.0
+	camera_mouse_follow_strength_slider.max_value = 1.0
+	camera_mouse_follow_strength_slider.step = 0.01
+	camera_mouse_follow_strength_slider.value = _settings_get_float("camera_mouse_follow_strength", 0.45)
+	_update_mouse_follow_controls_enabled()
+
 	_update_labels()
+	_is_initializing_controls = false
 
 
 func _input(event: InputEvent) -> void:
@@ -90,18 +116,20 @@ func _on_close_button_pressed() -> void:
 
 
 func _on_right_drag_yaw_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
 	_settings_set("right_drag_yaw_sensitivity", value / 10000.0)
-	if player and player.has_method("refresh_camera_from_settings"):
-		player.call("refresh_camera_from_settings")
+	_apply_player_settings(false)
 	_settings_save()
 	_update_labels()
 
 
 func _on_camera_drag_enabled_toggled(toggled_on: bool) -> void:
+	if _is_initializing_controls:
+		return
 	_settings_set("camera_drag_enabled", toggled_on)
 	_update_drag_sensitivity_enabled()
-	if player and player.has_method("refresh_camera_from_settings"):
-		player.call("refresh_camera_from_settings")
+	_apply_player_settings(false)
 	_settings_save()
 
 
@@ -112,27 +140,56 @@ func _update_drag_sensitivity_enabled() -> void:
 
 
 func _on_camera_drag_sensitivity_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
 	_settings_set("camera_drag_sensitivity", value)
-	if player and player.has_method("refresh_camera_from_settings"):
-		player.call("refresh_camera_from_settings")
+	_apply_player_settings(false)
 	_settings_save()
 	_update_labels()
 
 
 func _on_camera_tilt_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
 	_settings_set("camera_height", value)
-	if player and player.has_method("refresh_camera_from_settings"):
-		player.call("refresh_camera_from_settings")
+	_apply_player_settings(true)
 	_settings_save()
 	_update_labels()
 
 
 func _on_camera_distance_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
 	_settings_set("camera_distance", value)
-	if player and player.has_method("refresh_camera_from_settings"):
-		player.call("refresh_camera_from_settings")
+	_apply_player_settings(true)
 	_settings_save()
 	_update_labels()
+
+
+func _on_camera_mouse_follow_enabled_toggled(toggled_on: bool) -> void:
+	if _is_initializing_controls:
+		return
+	_settings_set("camera_mouse_follow_enabled", toggled_on)
+	_update_mouse_follow_controls_enabled()
+	# Toggle state is persisted immediately, but do not force camera refresh while menu is open.
+	_apply_player_settings(false)
+	_settings_save()
+
+
+func _on_camera_mouse_follow_strength_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
+	_settings_set("camera_mouse_follow_strength", value)
+	# Strength changes are persisted immediately, but do not force camera refresh while dragging.
+	_apply_player_settings(false)
+	_settings_save()
+	_update_labels()
+
+
+func _update_mouse_follow_controls_enabled() -> void:
+	var enabled := camera_mouse_follow_enabled_checkbox.button_pressed
+	camera_mouse_follow_strength_slider.editable = enabled
+	camera_mouse_follow_strength_value.modulate = Color(1, 1, 1, 0.5) if not enabled else Color.WHITE
 
 
 func _on_tilt_minus_pressed() -> void:
@@ -172,6 +229,7 @@ func _update_labels() -> void:
 	camera_drag_sensitivity_value.text = "%.1f" % camera_drag_sensitivity_slider.value
 	camera_tilt_value.text = "%.1f" % camera_tilt_slider.value
 	camera_distance_value.text = "%.1f" % camera_distance_slider.value
+	camera_mouse_follow_strength_value.text = "%.2f" % camera_mouse_follow_strength_slider.value
 
 
 func _settings_node() -> Node:

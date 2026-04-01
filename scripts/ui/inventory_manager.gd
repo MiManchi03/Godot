@@ -161,3 +161,48 @@ func move_to_hotbar(inventory_slot: int, hotbar_slot: int) -> bool:
 	inventory_changed.emit()
 	hotbar_changed.emit()
 	return true
+
+
+func swap_slots(from_is_hotbar: bool, from_index: int, to_is_hotbar: bool, to_index: int) -> bool:
+	if from_is_hotbar:
+		if from_index < 0 or from_index >= HOTBAR_SIZE:
+			return false
+	else:
+		if from_index < 0 or from_index >= INVENTORY_SIZE:
+			return false
+
+	if to_is_hotbar:
+		if to_index < 0 or to_index >= HOTBAR_SIZE:
+			return false
+	else:
+		if to_index < 0 or to_index >= INVENTORY_SIZE:
+			return false
+
+	if from_is_hotbar and to_is_hotbar:
+		var tmp_hot: Variant = hotbar[from_index]
+		hotbar[from_index] = hotbar[to_index]
+		hotbar[to_index] = tmp_hot
+		hotbar_changed.emit()
+		return true
+
+	if (not from_is_hotbar) and (not to_is_hotbar):
+		var tmp_inv: Variant = inventory[from_index]
+		inventory[from_index] = inventory[to_index]
+		inventory[to_index] = tmp_inv
+		inventory_changed.emit()
+		return true
+
+	if from_is_hotbar and (not to_is_hotbar):
+		var tmp_cross: Variant = hotbar[from_index]
+		hotbar[from_index] = inventory[to_index]
+		inventory[to_index] = tmp_cross
+		inventory_changed.emit()
+		hotbar_changed.emit()
+		return true
+
+	var tmp_cross2: Variant = inventory[from_index]
+	inventory[from_index] = hotbar[to_index]
+	hotbar[to_index] = tmp_cross2
+	inventory_changed.emit()
+	hotbar_changed.emit()
+	return true

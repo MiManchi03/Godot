@@ -11,8 +11,10 @@ extends CharacterBody3D
 @export var air_rotation_speed: float = 32.0
 @export var jump_velocity: float = 14.4
 @export var gravity_strength: float = 40.0
-@export var camera_distance: float = 10.0
-@export var camera_height: float = 2.0
+@export var camera_distance: float = 8.5
+@export var camera_height: float = 26.0
+@export var camera_mouse_follow_enabled: bool = true
+@export var camera_mouse_follow_strength: float = 0.45
 
 @onready var camera: Camera3D = $Camera3D
 
@@ -36,6 +38,7 @@ var _tilt_cached: float = 0.0
 var _horizontal_radius_cached: float = 0.0
 var _height_cached: float = 0.0
 var _geometry_cache_valid: bool = false
+var _mouse_follow_world_offset: Vector3 = Vector3.ZERO
 
 var _last_raycast_pos: Vector2 = Vector2.ZERO
 var _raycast_timer: float = 0.0
@@ -45,6 +48,16 @@ const DESTROY_UI_COMPLETE_HOLD: float = 0.12
 const DESTROY_UI_WIDTH: float = 380.0
 const DESTROY_UI_HEIGHT: float = 40.0
 const DESTROY_UI_TOP_OFFSET_Y: float = 12.0
+const CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL: float = 2.4
+const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_UP: float = 1.8
+const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN: float = 2.8
+const CAMERA_MOUSE_FOLLOW_DEADZONE: float = 0.04
+const CAMERA_MOUSE_FOLLOW_RESPONSE_EXP: float = 1.6
+const CAMERA_MOUSE_FOLLOW_LERP_SPEED_MIN: float = 5.5
+const CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX: float = 11.0
+const CAMERA_MOUSE_FOLLOW_BOTTOM_COMPENSATION_PX: float = 90.0
+const CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH: float = 5.0
+const CAMERA_MOUSE_FOLLOW_DOWN_NY_CAP: float = 0.8
 
 var _destroy_ui_layer: CanvasLayer
 var _destroy_ui_panel: PanelContainer
@@ -64,7 +77,7 @@ func _ready() -> void:
 	if camera:
 		camera.top_level = true
 		base_camera_fov = camera.fov
-		_update_camera_follow()
+		_update_camera_follow(0.0)
 	
 	floor_snap_length = 0.35
 	
@@ -223,6 +236,8 @@ func apply_camera_settings() -> void:
 	camera_angle_offset = _settings_get_float("camera_angle_offset", camera_angle_offset)
 	camera_drag_enabled = _settings_get_bool("camera_drag_enabled", camera_drag_enabled)
 	camera_drag_sensitivity = _settings_get_float("camera_drag_sensitivity", camera_drag_sensitivity)
+	camera_mouse_follow_enabled = _settings_get_bool("camera_mouse_follow_enabled", camera_mouse_follow_enabled)
+	camera_mouse_follow_strength = _settings_get_float("camera_mouse_follow_strength", camera_mouse_follow_strength)
 	
 	if old_camera_height != camera_height or old_camera_distance != camera_distance:
 		_geometry_cache_valid = false
@@ -232,7 +247,8 @@ func refresh_camera_from_settings() -> void:
 	apply_camera_settings()
 	_angle_cache_valid = false
 	_last_angle = camera_angle_offset
-	_update_camera_follow()
+	# Settings menu pauses the tree; refresh once without interpolation to avoid drift while dragging sliders.
+	_update_camera_follow(0.0)
 
 func _settings_node() -> Node:
 	return get_node_or_null("/root/GameSettings")
@@ -275,7 +291,7 @@ func _physics_process(delta: float) -> void:
 	_update_character_rotation_toward_mouse(delta)
 	_handle_vertical_motion(delta)
 	_handle_movement(delta)
-	_update_camera_follow()
+	_update_camera_follow(delta)
 	_update_destruction(delta)
 	_update_destroy_ui_timers(delta)
 	move_and_slide()
@@ -448,7 +464,16 @@ func _handle_vertical_motion(delta: float) -> void:
 	if Input.is_action_just_pressed("jump") and is_on_floor():
 		velocity.y = jump_velocity
 
-func _update_camera_follow() -> void:
+func _shape_mouse_follow_axis(value: float) -> float:
+	var abs_value := absf(value)
+	if abs_value <= CAMERA_MOUSE_FOLLOW_DEADZONE:
+		return 0.0
+	var normalized := (abs_value - CAMERA_MOUSE_FOLLOW_DEADZONE) / (1.0 - CAMERA_MOUSE_FOLLOW_DEADZONE)
+	normalized = pow(clampf(normalized, 0.0, 1.0), CAMERA_MOUSE_FOLLOW_RESPONSE_EXP)
+	return signf(value) * normalized
+
+
+func _update_camera_follow(delta: float = 0.0) -> void:
 	if not camera:
 		return
 
@@ -485,9 +510,48 @@ func _update_camera_follow() -> void:
 
 	var x: float = _horizontal_radius_cached * _sin_angle
 	var z: float = _horizontal_radius_cached * _cos_angle
+	var base_camera_position := global_position + Vector3(x, _height_cached, z)
+	var base_look_target := global_position + Vector3(0, 1.5, 0)
 
-	camera.global_position = global_position + Vector3(x, _height_cached, z)
-	camera.look_at(global_position + Vector3(0, 1.5, 0), Vector3.UP)
+	var desired_mouse_offset := Vector3.ZERO
+	if camera_mouse_follow_enabled:
+		var viewport := get_viewport()
+		if viewport:
+			var visible_size := viewport.get_visible_rect().size
+			if visible_size.x > 1.0 and visible_size.y > 1.0:
+				var mouse_pos := viewport.get_mouse_position()
+				var nx_raw := clampf((mouse_pos.x / visible_size.x - 0.5) * 2.0, -1.0, 1.0)
+				var effective_height := maxf(1.0, visible_size.y - CAMERA_MOUSE_FOLLOW_BOTTOM_COMPENSATION_PX)
+				var ny_raw := clampf((mouse_pos.y / effective_height - 0.5) * 2.0, -1.0, 1.0)
+				var nx := _shape_mouse_follow_axis(nx_raw)
+				var ny := _shape_mouse_follow_axis(ny_raw)
+				if ny > 0.0:
+					ny = minf(ny, CAMERA_MOUSE_FOLLOW_DOWN_NY_CAP)
+				var forward := Vector3(-_sin_angle, 0.0, -_cos_angle)
+				if forward.length_squared() > 0.0001:
+					forward = forward.normalized()
+				var right := -forward.rotated(Vector3.UP, PI * 0.5)
+				var depth_scale := CAMERA_MOUSE_FOLLOW_MAX_DEPTH_UP
+				if ny > 0.0:
+					depth_scale = CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN
+				desired_mouse_offset = (
+					right * (nx * CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL)
+					+ forward * (-ny * depth_scale)
+				) * clampf(camera_mouse_follow_strength, 0.0, 1.0)
+				desired_mouse_offset.y = 0.0
+				if desired_mouse_offset.length() > CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH:
+					desired_mouse_offset = desired_mouse_offset.normalized() * CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH
+
+	if delta > 0.0:
+		var strength := clampf(camera_mouse_follow_strength, 0.0, 1.0)
+		var lerp_speed := lerpf(CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX, CAMERA_MOUSE_FOLLOW_LERP_SPEED_MIN, strength)
+		var t := clampf(lerp_speed * delta, 0.0, 1.0)
+		_mouse_follow_world_offset = _mouse_follow_world_offset.lerp(desired_mouse_offset, t)
+	else:
+		_mouse_follow_world_offset = desired_mouse_offset
+
+	camera.global_position = base_camera_position + _mouse_follow_world_offset
+	camera.look_at(base_look_target + _mouse_follow_world_offset, Vector3.UP)
 	camera.current = true
 
 

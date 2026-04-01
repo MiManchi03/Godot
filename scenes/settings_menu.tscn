@@ -124,7 +124,7 @@ text = ">"
 
 [node name="CameraTiltValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraTiltRow"]
 custom_minimum_size = Vector2(50, 0)
-text = "2.0"
+text = "26.0"
 horizontal_alignment = 2
 vertical_alignment = 1
 
@@ -150,7 +150,29 @@ text = ">"
 
 [node name="CameraDistanceValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraDistanceRow"]
 custom_minimum_size = Vector2(50, 0)
-text = "10.0"
+text = "8.5"
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[node name="CameraMouseFollowEnabledCheckBox" type="CheckButton" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "鼠标动态偏移视角"
+
+[node name="CameraMouseFollowStrengthRow" type="HBoxContainer" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CameraMouseFollowStrengthLabel" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
+custom_minimum_size = Vector2(120, 0)
+size_flags_horizontal = 3
+text = "偏移强度"
+vertical_alignment = 1
+
+[node name="CameraMouseFollowStrengthSlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
+custom_minimum_size = Vector2(150, 0)
+
+[node name="CameraMouseFollowStrengthValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
+custom_minimum_size = Vector2(50, 0)
+text = "0.45"
 horizontal_alignment = 2
 vertical_alignment = 1
 
@@ -171,8 +193,10 @@ text = "关闭"
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/TiltPlus" to="." method="_on_tilt_plus_pressed"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistanceMinus" to="." method="_on_distance_minus_pressed"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistancePlus" to="." method="_on_distance_plus_pressed"]
+[connection signal="toggled" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowEnabledCheckBox" to="." method="_on_camera_mouse_follow_enabled_toggled"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CloseButton" to="." method="_on_close_button_pressed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/RightDragYawSlider" to="." method="_on_right_drag_yaw_slider_value_changed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/CameraDragSensitivitySlider" to="." method="_on_camera_drag_sensitivity_slider_value_changed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/CameraTiltSlider" to="." method="_on_camera_tilt_slider_value_changed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/CameraDistanceSlider" to="." method="_on_camera_distance_slider_value_changed"]
+[connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/CameraMouseFollowStrengthSlider" to="." method="_on_camera_mouse_follow_strength_slider_value_changed"]
