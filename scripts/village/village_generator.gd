@@ -16,6 +16,8 @@ enum BuildingType {
 	FARM,
 	TOWER,
 	BARRACK,
+	CAMPFIRE,
+	FENCE_POST,
 }
 
 const KENNEY_BUILDING_SCENE_PATHS := {
@@ -169,6 +171,7 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		village.add_child(building)
 
 	var campfire := _create_campfire()
+	_tag_building_identity(campfire, BuildingType.CAMPFIRE, type_counts)
 	campfire.position = village_center_offset
 	village.add_child(campfire)
 
@@ -177,6 +180,7 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		var angle := (TAU * float(i) / float(post_count)) + rng.randf_range(-0.12, 0.12)
 		var radius := footprint_radius + rng.randf_range(-0.7, 1.2)
 		var post := _create_fence_post()
+		_tag_building_identity(post, BuildingType.FENCE_POST, type_counts)
 		post.position = Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
 		post.rotate_y(rng.randf_range(0.0, TAU))
 		village.add_child(post)
@@ -267,6 +271,10 @@ func _create_building_variant(rng: RandomNumberGenerator, building_type: Buildin
 			return _create_tower_variant(rng)
 		BuildingType.BARRACK:
 			return _create_barrack_variant(rng)
+		BuildingType.CAMPFIRE:
+			return _create_campfire()
+		BuildingType.FENCE_POST:
+			return _create_fence_post()
 		_:
 			return _create_house_variant(rng)
 
@@ -313,6 +321,10 @@ func _building_type_name(building_type: BuildingType) -> String:
 			return "Tower"
 		BuildingType.BARRACK:
 			return "Barrack"
+		BuildingType.CAMPFIRE:
+			return "Campfire"
+		BuildingType.FENCE_POST:
+			return "FencePost"
 		_:
 			return "Building"
 
@@ -335,6 +347,10 @@ func _building_type_id(building_type: BuildingType) -> String:
 			return "tower"
 		BuildingType.BARRACK:
 			return "barrack"
+		BuildingType.CAMPFIRE:
+			return "campfire"
+		BuildingType.FENCE_POST:
+			return "fencepost"
 		_:
 			return ""
 
@@ -640,6 +656,8 @@ func _create_campfire() -> Node3D:
 	flame.material_override = _material(Color(0.96, 0.47, 0.14), true)
 	root.add_child(flame)
 
+	_add_cylinder_collision(root, 0.95, 0.9, Vector3(0.0, 0.45, 0.0))
+
 	return root
 
 
@@ -656,6 +674,8 @@ func _create_fence_post() -> Node3D:
 	mesh_instance.position = Vector3(0.0, 0.55, 0.0)
 	mesh_instance.material_override = _material(Color(0.48, 0.28, 0.15))
 	post.add_child(mesh_instance)
+
+	_add_cylinder_collision(post, 0.14, 1.1, Vector3(0.0, 0.55, 0.0))
 
 	return post
 

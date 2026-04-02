@@ -112,6 +112,8 @@ const BUILDING_DEFS := [
 	{"id": "warehouse", "label": "仓库", "emoji": "📦", "type": VillageGenerator.BuildingType.WAREHOUSE},
 	{"id": "market", "label": "市场", "emoji": "🏪", "type": VillageGenerator.BuildingType.MARKET},
 	{"id": "well", "label": "水井", "emoji": "🪣", "type": VillageGenerator.BuildingType.WELL},
+	{"id": "campfire", "label": "篝火", "emoji": "🔥", "type": VillageGenerator.BuildingType.CAMPFIRE},
+	{"id": "fencepost", "label": "围栏桩", "emoji": "🪵", "type": VillageGenerator.BuildingType.FENCE_POST},
 	{"id": "farm", "label": "农场", "emoji": "🌾", "type": VillageGenerator.BuildingType.FARM},
 	{"id": "tower", "label": "塔楼", "emoji": "🗼", "type": VillageGenerator.BuildingType.TOWER},
 	{"id": "barrack", "label": "兵营", "emoji": "⚔️", "type": VillageGenerator.BuildingType.BARRACK},
@@ -885,6 +887,10 @@ func _build_id_from_node_name(node_name: String) -> String:
 		return "market"
 	if lower.find("well") != -1:
 		return "well"
+	if lower.find("campfire") != -1:
+		return "campfire"
+	if lower.find("fencepost") != -1 or lower.find("fence_post") != -1 or lower.find("fence") != -1:
+		return "fencepost"
 	if lower.find("farm") != -1:
 		return "farm"
 	if lower.find("tower") != -1:
@@ -903,6 +909,10 @@ func _build_id_from_node_name(node_name: String) -> String:
 			return "market"
 		"Well":
 			return "well"
+		"Campfire":
+			return "campfire"
+		"FencePost", "Fence_Post":
+			return "fencepost"
 		"Farm", "FarmPlot":
 			return "farm"
 		"Tower":
