@@ -48,6 +48,8 @@ const DESTROY_UI_COMPLETE_HOLD: float = 0.12
 const DESTROY_UI_WIDTH: float = 380.0
 const DESTROY_UI_HEIGHT: float = 40.0
 const DESTROY_UI_TOP_OFFSET_Y: float = 12.0
+const DESTROY_RAYCAST_LENGTH: float = 64.0
+const DESTROY_INTERACT_RANGE: float = (2.0 / 3.0) * 0.75
 const CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL: float = 2.4
 const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_UP: float = 1.8
 const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN: float = 2.8
@@ -1373,7 +1375,7 @@ func _check_destruction_target() -> void:
 	
 	var from: Vector3 = camera.project_ray_origin(mouse_pos)
 	var dir: Vector3 = camera.project_ray_normal(mouse_pos)
-	var to: Vector3 = from + dir * 10.0
+	var to: Vector3 = from + dir * DESTROY_RAYCAST_LENGTH
 	
 	var space_state := get_world_3d().direct_space_state
 	
@@ -1389,10 +1391,7 @@ func _check_destruction_target() -> void:
 		
 		if collider is Destructible:
 			var target: Destructible = collider as Destructible
-			var dist: float = global_position.distance_to(target.global_position)
-			var destroy_range: float = 1.5
-			
-			if dist <= destroy_range:
+			if _is_target_within_destroy_range(target) and _has_clear_destruction_line(target):
 				if current_target != target:
 					current_target = target
 					current_target.start_destruction()
@@ -1403,6 +1402,60 @@ func _check_destruction_target() -> void:
 		current_target = null
 	if not _destroy_ui_fast_mode and _destroy_ui_hold_timer <= 0.0:
 		_hide_destroy_ui()
+
+
+func _is_target_within_destroy_range(target: Destructible) -> bool:
+	if target == null:
+		return false
+	var range_shape := SphereShape3D.new()
+	range_shape.radius = DESTROY_INTERACT_RANGE
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = range_shape
+	query.transform = Transform3D(Basis.IDENTITY, global_position + Vector3(0.0, 1.0, 0.0))
+	query.collide_with_areas = true
+	query.collide_with_bodies = false
+	query.collision_mask = 2
+	query.exclude = [get_rid()]
+	var hits := get_world_3d().direct_space_state.intersect_shape(query, 64)
+	for hit_variant in hits:
+		var hit := hit_variant as Dictionary
+		var collider = hit.get("collider")
+		if collider == target:
+			return true
+		if collider is Node:
+			var node := collider as Node
+			if node.is_ancestor_of(target):
+				return true
+			if target.is_ancestor_of(node):
+				return true
+	return false
+
+
+func _has_clear_destruction_line(target: Destructible) -> bool:
+	if target == null:
+		return false
+	var from := global_position + Vector3(0.0, 1.1, 0.0)
+	var to := target.global_position + Vector3(0.0, 0.6, 0.0)
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	query.collision_mask = 1
+	query.exclude = [get_rid()]
+	var result: Dictionary = get_world_3d().direct_space_state.intersect_ray(query)
+	if result.is_empty():
+		return true
+	var collider = result.get("collider")
+	if collider is Node:
+		var node := collider as Node
+		if node.name == "Ground":
+			return true
+		if node == target:
+			return true
+		if node.is_ancestor_of(target):
+			return true
+		if target.is_ancestor_of(node):
+			return true
+	return false
 
 
 func _complete_destruction() -> void:
