@@ -1275,7 +1275,7 @@ func _handle_vertical_motion(delta: float) -> void:
 	elif velocity.y < 0.0:
 		velocity.y = 0.0
 
-	if Input.is_action_just_pressed("jump") and is_on_floor():
+	if Input.is_action_pressed("jump") and is_on_floor():
 		velocity.y = jump_velocity
 
 func _shape_mouse_follow_axis(value: float) -> float:

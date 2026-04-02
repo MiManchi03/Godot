@@ -81,6 +81,16 @@ func _setup_ui() -> void:
 		var select_indicator := PanelContainer.new()
 		select_indicator.name = "Select"
 		select_indicator.set_anchors_preset(Control.PRESET_FULL_RECT)
+		select_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var select_style := StyleBoxFlat.new()
+		select_style.bg_color = Color(0.0, 0.0, 0.0, 0.0)
+		select_style.draw_center = false
+		select_style.border_width_left = 2
+		select_style.border_width_top = 2
+		select_style.border_width_right = 2
+		select_style.border_width_bottom = 2
+		select_style.border_color = Color(1.0, 0.95, 0.65, 1.0)
+		select_indicator.add_theme_stylebox_override("panel", select_style)
 		select_indicator.visible = false
 		content.add_child(select_indicator)
 		
