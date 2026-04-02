@@ -103,6 +103,8 @@ var _build_buttons_by_id: Dictionary = {}
 var _build_preview_root: Node3D
 var _build_preview_rotation_deg: float = 0.0
 var _build_preview_valid: bool = false
+var _build_preview_variant_seed: int = 0
+var _build_forced_variant_seed: int = 0
 var _build_village_generator: VillageGenerator
 var _build_rng := RandomNumberGenerator.new()
 
@@ -610,6 +612,9 @@ func _exit_build_mode() -> void:
 	_build_mode = false
 	visible = true
 	_build_drag_map = false
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager:
+		world_manager.call("save_player_buildings")
 	_cancel_build_selection()
 
 	if _build_ui_root:
@@ -791,6 +796,7 @@ func _cancel_build_selection() -> void:
 		_build_preview_root.queue_free()
 		_build_preview_root = null
 	_build_selected_id = ""
+	_build_preview_variant_seed = 0
 	_refresh_build_button_highlight()
 
 
@@ -851,12 +857,21 @@ func _spawn_build_preview() -> void:
 	if type == -1:
 		return
 
-	var preview := _build_village_generator._create_building_variant(_build_rng, type)
+	if _build_forced_variant_seed != 0:
+		_build_preview_variant_seed = _build_forced_variant_seed
+	else:
+		_build_preview_variant_seed = int(_build_rng.randi())
+	_build_forced_variant_seed = 0
+
+	var preview_rng := RandomNumberGenerator.new()
+	preview_rng.seed = _build_preview_variant_seed
+	var preview := _build_village_generator._create_building_variant(preview_rng, type)
 	if preview == null:
 		return
 
 	preview.name = "BuildPreview"
 	preview.set_meta("build_id", _build_selected_id)
+	preview.set_meta("variant_seed", _build_preview_variant_seed)
 	get_parent().add_child(preview)
 	_build_preview_root = preview
 	_build_preview_rotation_deg = 0.0
@@ -1043,7 +1058,13 @@ func _try_pick_existing_building_to_preview() -> bool:
 
 	var picked_pos := building_root.global_position
 	var picked_rot := building_root.rotation.y
+	var picked_variant_seed := int(building_root.get_meta("variant_seed", 0))
+	var was_player_placed := bool(building_root.get_meta("player_placed", false))
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager:
+		world_manager.call("on_pick_existing_building", build_id, picked_pos, building_root.name, was_player_placed)
 	building_root.queue_free()
+	_build_forced_variant_seed = picked_variant_seed
 	_select_building(build_id)
 	if _build_preview_root:
 		_build_preview_root.global_position = picked_pos
@@ -1116,6 +1137,10 @@ func _update_build_preview() -> void:
 	if not _build_preview_root:
 		return
 	var pos := _mouse_ground_position()
+	if pos == Vector3.ZERO:
+		_build_preview_valid = false
+		_set_preview_tint(_build_preview_root, Color(0.9, 0.2, 0.2, 0.7))
+		return
 	_build_preview_root.global_position = pos
 	_build_preview_root.rotation.y = deg_to_rad(_build_preview_rotation_deg)
 	var invalid := _preview_overlaps()
@@ -1129,13 +1154,22 @@ func _try_place_building() -> void:
 	var type := _building_type_from_id(_build_selected_id)
 	if type == -1:
 		return
-	var placed := _build_village_generator._create_building_variant(_build_rng, type)
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager == null:
+		return
+	var placed_variant = world_manager.call(
+		"spawn_player_building",
+		_build_selected_id,
+		_build_preview_root.global_position,
+		_build_preview_root.rotation.y,
+		_build_preview_variant_seed
+	)
+	if placed_variant == null:
+		return
+	var placed := placed_variant as Node3D
 	if placed == null:
 		return
-	placed.set_meta("build_id", _build_selected_id)
-	placed.global_position = _build_preview_root.global_position
-	placed.rotation.y = _build_preview_root.rotation.y
-	get_parent().add_child(placed)
+	world_manager.call("add_player_building", _build_selected_id, placed.global_position, placed.rotation.y, placed.name, _build_preview_variant_seed)
 
 	# Place once, then clear current selection/preview.
 	_cancel_build_selection()
