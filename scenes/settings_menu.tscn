@@ -203,8 +203,16 @@ size_flags_horizontal = 3
 text = "偏移强度"
 vertical_alignment = 1
 
+[node name="MouseFollowStrengthMinus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
+custom_minimum_size = Vector2(30, 0)
+text = "<"
+
 [node name="CameraMouseFollowStrengthSlider" type="HSlider" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
 custom_minimum_size = Vector2(150, 0)
+
+[node name="MouseFollowStrengthPlus" type="Button" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
+custom_minimum_size = Vector2(30, 0)
+text = ">"
 
 [node name="CameraMouseFollowStrengthValue" type="Label" parent="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow"]
 custom_minimum_size = Vector2(50, 0)
@@ -231,6 +239,8 @@ text = "关闭"
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraTiltRow/TiltPlus" to="." method="_on_tilt_plus_pressed"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistanceMinus" to="." method="_on_distance_minus_pressed"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraDistanceRow/DistancePlus" to="." method="_on_distance_plus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/MouseFollowStrengthMinus" to="." method="_on_mouse_follow_strength_minus_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/MouseFollowStrengthPlus" to="." method="_on_mouse_follow_strength_plus_pressed"]
 [connection signal="toggled" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowEnabledCheckBox" to="." method="_on_camera_mouse_follow_enabled_toggled"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CloseButton" to="." method="_on_close_button_pressed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/RightDragYawSlider" to="." method="_on_right_drag_yaw_slider_value_changed"]

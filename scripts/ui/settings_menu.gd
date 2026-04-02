@@ -76,7 +76,7 @@ func _ready() -> void:
 	camera_mouse_follow_enabled_checkbox.button_pressed = mouse_follow_enabled
 
 	camera_mouse_follow_strength_slider.min_value = 0.0
-	camera_mouse_follow_strength_slider.max_value = 1.0
+	camera_mouse_follow_strength_slider.max_value = 2.0
 	camera_mouse_follow_strength_slider.step = 0.01
 	camera_mouse_follow_strength_slider.value = _settings_get_float("camera_mouse_follow_strength", 0.45)
 	_update_mouse_follow_controls_enabled()
@@ -247,6 +247,14 @@ func _on_distance_minus_pressed() -> void:
 
 func _on_distance_plus_pressed() -> void:
 	camera_distance_slider.value = minf(camera_distance_slider.max_value, camera_distance_slider.value + 0.1)
+
+
+func _on_mouse_follow_strength_minus_pressed() -> void:
+	camera_mouse_follow_strength_slider.value = maxf(camera_mouse_follow_strength_slider.min_value, camera_mouse_follow_strength_slider.value - 0.01)
+
+
+func _on_mouse_follow_strength_plus_pressed() -> void:
+	camera_mouse_follow_strength_slider.value = minf(camera_mouse_follow_strength_slider.max_value, camera_mouse_follow_strength_slider.value + 0.01)
 
 
 func _update_labels() -> void:

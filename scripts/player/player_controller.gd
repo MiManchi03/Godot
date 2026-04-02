@@ -51,6 +51,7 @@ const DESTROY_UI_TOP_OFFSET_Y: float = 12.0
 const DESTROY_RAYCAST_LENGTH: float = 64.0
 const DESTROY_INTERACT_RANGE: float = (2.0 / 3.0) * 0.75
 const CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL: float = 2.4
+const CAMERA_MOUSE_FOLLOW_SIDE_BOOST: float = 1.25
 const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_UP: float = 1.8
 const CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN: float = 2.8
 const CAMERA_MOUSE_FOLLOW_DEADZONE: float = 0.04
@@ -1286,6 +1287,12 @@ func _shape_mouse_follow_axis(value: float) -> float:
 	return signf(value) * normalized
 
 
+func _effective_mouse_follow_strength(value: float) -> float:
+	var x := clampf(value / 2.0, 0.0, 1.0)
+	var shaped := 0.5 + 0.5 * tanh((x - 0.5) * 2.6) / tanh(1.3)
+	return lerpf(0.0, 1.55, shaped)
+
+
 func _update_camera_follow(delta: float = 0.0) -> void:
 	if not camera:
 		return
@@ -1327,6 +1334,8 @@ func _update_camera_follow(delta: float = 0.0) -> void:
 	var base_look_target := global_position + Vector3(0, 1.5, 0)
 
 	var desired_mouse_offset := Vector3.ZERO
+	var raw_follow_strength := clampf(camera_mouse_follow_strength, 0.0, 2.0)
+	var effective_follow_strength := _effective_mouse_follow_strength(raw_follow_strength)
 	if camera_mouse_follow_enabled:
 		var viewport := get_viewport()
 		if viewport:
@@ -1348,16 +1357,16 @@ func _update_camera_follow(delta: float = 0.0) -> void:
 				if ny > 0.0:
 					depth_scale = CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN
 				desired_mouse_offset = (
-					right * (nx * CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL)
+					right * (nx * CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL * CAMERA_MOUSE_FOLLOW_SIDE_BOOST)
 					+ forward * (-ny * depth_scale)
-				) * clampf(camera_mouse_follow_strength, 0.0, 1.0)
+				) * effective_follow_strength
 				desired_mouse_offset.y = 0.0
 				if desired_mouse_offset.length() > CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH:
 					desired_mouse_offset = desired_mouse_offset.normalized() * CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH
 
 	if delta > 0.0:
-		var strength := clampf(camera_mouse_follow_strength, 0.0, 1.0)
-		var lerp_speed := lerpf(CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX, CAMERA_MOUSE_FOLLOW_LERP_SPEED_MIN, strength)
+		var response_t := clampf(raw_follow_strength / 2.0, 0.0, 1.0)
+		var lerp_speed := lerpf(CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX, CAMERA_MOUSE_FOLLOW_LERP_SPEED_MIN, response_t)
 		var t := clampf(lerp_speed * delta, 0.0, 1.0)
 		_mouse_follow_world_offset = _mouse_follow_world_offset.lerp(desired_mouse_offset, t)
 	else:
