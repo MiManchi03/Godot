@@ -6,6 +6,8 @@ extends CanvasLayer
 @onready var camera_drag_enabled_checkbox: CheckButton = $Panel/MarginContainer/VBoxContainer/CameraDragEnabledCheckBox
 @onready var camera_drag_sensitivity_slider: HSlider = $Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/CameraDragSensitivitySlider
 @onready var camera_drag_sensitivity_value: Label = $Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/CameraDragSensitivityValue
+@onready var build_drag_sensitivity_slider: HSlider = $Panel/MarginContainer/VBoxContainer/BuildDragSensitivityRow/BuildDragSensitivitySlider
+@onready var build_drag_sensitivity_value: Label = $Panel/MarginContainer/VBoxContainer/BuildDragSensitivityRow/BuildDragSensitivityValue
 @onready var camera_tilt_slider: HSlider = $Panel/MarginContainer/VBoxContainer/CameraTiltRow/CameraTiltSlider
 @onready var camera_tilt_value: Label = $Panel/MarginContainer/VBoxContainer/CameraTiltRow/CameraTiltValue
 @onready var camera_distance_slider: HSlider = $Panel/MarginContainer/VBoxContainer/CameraDistanceRow/CameraDistanceSlider
@@ -49,8 +51,14 @@ func _ready() -> void:
 	camera_drag_sensitivity_slider.min_value = 0.1
 	camera_drag_sensitivity_slider.max_value = 20.0
 	camera_drag_sensitivity_slider.step = 0.1
-	camera_drag_sensitivity_slider.value = 1.0
+	camera_drag_sensitivity_slider.value = _settings_get_float("camera_drag_sensitivity", 10.0)
 	_on_camera_drag_sensitivity_slider_value_changed(camera_drag_sensitivity_slider.value)
+
+	build_drag_sensitivity_slider.min_value = 0.1
+	build_drag_sensitivity_slider.max_value = 20.0
+	build_drag_sensitivity_slider.step = 0.1
+	build_drag_sensitivity_slider.value = _settings_get_float("build_drag_pan_sensitivity", 10.0)
+	_on_build_drag_sensitivity_slider_value_changed(build_drag_sensitivity_slider.value)
 
 	camera_tilt_slider.min_value = 1.0
 	camera_tilt_slider.max_value = 80.0
@@ -148,6 +156,15 @@ func _on_camera_drag_sensitivity_slider_value_changed(value: float) -> void:
 	_update_labels()
 
 
+func _on_build_drag_sensitivity_slider_value_changed(value: float) -> void:
+	if _is_initializing_controls:
+		return
+	_settings_set("build_drag_pan_sensitivity", value)
+	_apply_player_settings(false)
+	_settings_save()
+	_update_labels()
+
+
 func _on_camera_tilt_slider_value_changed(value: float) -> void:
 	if _is_initializing_controls:
 		return
@@ -216,6 +233,14 @@ func _on_drag_sensitivity_plus_pressed() -> void:
 	camera_drag_sensitivity_slider.value = minf(camera_drag_sensitivity_slider.max_value, camera_drag_sensitivity_slider.value + 0.1)
 
 
+func _on_build_drag_sensitivity_minus_pressed() -> void:
+	build_drag_sensitivity_slider.value = maxf(build_drag_sensitivity_slider.min_value, build_drag_sensitivity_slider.value - 0.1)
+
+
+func _on_build_drag_sensitivity_plus_pressed() -> void:
+	build_drag_sensitivity_slider.value = minf(build_drag_sensitivity_slider.max_value, build_drag_sensitivity_slider.value + 0.1)
+
+
 func _on_distance_minus_pressed() -> void:
 	camera_distance_slider.value = maxf(camera_distance_slider.min_value, camera_distance_slider.value - 0.1)
 
@@ -227,6 +252,7 @@ func _on_distance_plus_pressed() -> void:
 func _update_labels() -> void:
 	right_drag_yaw_value.text = "%d" % int(round(right_drag_yaw_slider.value))
 	camera_drag_sensitivity_value.text = "%.1f" % camera_drag_sensitivity_slider.value
+	build_drag_sensitivity_value.text = "%.1f" % build_drag_sensitivity_slider.value
 	camera_tilt_value.text = "%.1f" % camera_tilt_slider.value
 	camera_distance_value.text = "%.1f" % camera_distance_slider.value
 	camera_mouse_follow_strength_value.text = "%.2f" % camera_mouse_follow_strength_slider.value

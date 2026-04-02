@@ -66,11 +66,12 @@ const BUILD_CAMERA_HEIGHT_MIN: float = 3.0
 const BUILD_CAMERA_HEIGHT_MAX: float = 60.0
 const BUILD_CAMERA_ZOOM_MIN: float = 12.0
 const BUILD_CAMERA_ZOOM_MAX: float = 90.0
+const BUILD_CAMERA_TOPDOWN_PITCH_RAD: float = -1.5608
 const BUILD_ROTATE_STEP_DEGREES: float = 10.0
 const BUILD_ZOOM_WHEEL_STEP: float = 1.2
 const BUILD_ZOOM_BUTTON_STEP_SMALL: float = 1.0
 const BUILD_ZOOM_BUTTON_STEP_LARGE: float = 10.0
-const BUILD_DRAG_PAN_FACTOR: float = 0.035
+const BUILD_DRAG_MAX_MOUSE_DELTA: float = 64.0
 const BUILD_PICK_DOUBLE_CLICK_MS: int = 380
 const BUILD_PICK_DOUBLE_CLICK_DIST: float = 22.0
 const BUILD_PICK_DEBUG: bool = false
@@ -90,11 +91,13 @@ var _build_camera_zoom: float = 32.0
 var _build_camera_pan: Vector3 = Vector3.ZERO
 var _build_camera_target_position: Vector3 = Vector3.ZERO
 var _build_camera_rotation: float = 0.0
+var _build_drag_pan_factor: float = 0.035
 var _build_drag_map: bool = false
 var _build_last_mouse: Vector2 = Vector2.ZERO
 var _build_last_left_click_ms: int = -100000
 var _build_last_left_click_pos: Vector2 = Vector2.ZERO
 var _build_ignore_place_until_ms: int = 0
+var _camera_drag_delta_x: float = 0.0
 var _build_ui_layer: CanvasLayer
 var _build_ui_root: Control
 var _build_list_scroll: ScrollContainer
@@ -400,6 +403,8 @@ func apply_camera_settings() -> void:
 	camera_drag_sensitivity = _settings_get_float("camera_drag_sensitivity", camera_drag_sensitivity)
 	camera_mouse_follow_enabled = _settings_get_bool("camera_mouse_follow_enabled", camera_mouse_follow_enabled)
 	camera_mouse_follow_strength = _settings_get_float("camera_mouse_follow_strength", camera_mouse_follow_strength)
+	var build_drag_sensitivity_ui := _settings_get_float("build_drag_pan_sensitivity", 10.0)
+	_build_drag_pan_factor = _build_drag_factor_from_setting(build_drag_sensitivity_ui)
 	
 	if old_camera_height != camera_height or old_camera_distance != camera_distance:
 		_geometry_cache_valid = false
@@ -490,18 +495,36 @@ func _update_sprint_fov(delta: float) -> void:
 
 func _update_camera_drag() -> void:
 	if not is_dragging_camera or not camera_drag_enabled:
+		_camera_drag_delta_x = 0.0
 		return
-	
-	var relative := Input.get_last_mouse_velocity()
-	var angle_change := relative.x * camera_drag_sensitivity * camera_drag_sensitivity * 0.0000005
+	if absf(_camera_drag_delta_x) < 0.001:
+		return
+	var drag_gain := _camera_drag_gain_from_setting(camera_drag_sensitivity)
+	var angle_change := _camera_drag_delta_x * drag_gain
+	_camera_drag_delta_x = 0.0
 	camera_angle_offset -= angle_change
-	
-	if abs(angle_change) > 0.1:
+	if absf(angle_change) > 0.00001:
 		_angle_cache_valid = false
 	
 	camera_angle_offset = fmod(camera_angle_offset, 360.0)
 	if camera_angle_offset < 0:
 		camera_angle_offset += 360.0
+
+
+func _camera_drag_gain_from_setting(value: float) -> float:
+	var x := clampf((value - 0.1) / (20.0 - 0.1), 0.0, 1.0)
+	var centered := x - 0.5
+	var shaped := 0.5 + 0.5 * tanh(centered * 3.2) / tanh(1.6)
+	var high_tail := clampf((x - 0.72) / 0.28, 0.0, 1.0)
+	var boosted := clampf(shaped + pow(high_tail, 2.2) * 0.24, 0.0, 1.0)
+	return lerpf(0.00018, 0.0095, boosted)
+
+
+func _build_drag_factor_from_setting(value: float) -> float:
+	var x := clampf((value - 0.1) / (20.0 - 0.1), 0.0, 1.0)
+	var centered := x - 0.5
+	var shaped := 0.5 + 0.5 * tanh(centered * 3.0) / tanh(1.5)
+	return lerpf(0.0015, 0.16, shaped)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_B:
@@ -520,8 +543,14 @@ func _input(event: InputEvent) -> void:
 				cancel_destruction()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			is_dragging_camera = event.pressed
+			if is_dragging_camera:
+				_camera_drag_delta_x = 0.0
 			if not is_dragging_camera:
 				_save_camera_angle()
+
+	if event is InputEventMouseMotion and is_dragging_camera and camera_drag_enabled:
+		var motion := event as InputEventMouseMotion
+		_camera_drag_delta_x += motion.relative.x
 	
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_TAB:
@@ -643,9 +672,9 @@ func _exit_build_mode() -> void:
 func _build_look_down_step(weight: float) -> void:
 	var look_target := _build_camera_target_position + _build_camera_pan
 	var from_pos := global_position + Vector3(_horizontal_radius_cached * _sin_angle, _height_cached, _horizontal_radius_cached * _cos_angle)
-	var to_pos := look_target + Vector3(0.0, _build_camera_height, 0.01)
+	var to_pos := look_target + Vector3(0.0, _build_camera_height, 0.0)
 	camera.global_position = from_pos.lerp(to_pos, weight)
-	camera.look_at(look_target, Vector3.FORWARD)
+	_apply_build_camera_rotation()
 
 
 func _build_look_follow_step(_weight: float) -> void:
@@ -657,7 +686,7 @@ func _update_build_mode(delta: float) -> void:
 		return
 
 	var look_target := _build_camera_target_position + _build_camera_pan
-	var desired_pos := look_target + Vector3(0.0, _build_camera_height, 0.01)
+	var desired_pos := look_target + Vector3(0.0, _build_camera_height, 0.0)
 	if _build_transition_tween and _build_transition_tween.is_running():
 		# Transition tween drives camera.
 		pass
@@ -665,7 +694,7 @@ func _update_build_mode(delta: float) -> void:
 		camera.global_position = camera.global_position.lerp(desired_pos, clampf(delta * 10.0, 0.0, 1.0))
 		camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 		camera.size = lerpf(camera.size, _build_camera_zoom, clampf(delta * 12.0, 0.0, 1.0))
-		camera.look_at(look_target, Vector3.FORWARD)
+		_apply_build_camera_rotation()
 
 	_update_build_preview()
 
@@ -719,8 +748,13 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		if _build_drag_map:
 			var motion := event as InputEventMouseMotion
-			_build_camera_pan.x -= motion.relative.x * BUILD_DRAG_PAN_FACTOR
-			_build_camera_pan.z += motion.relative.y * BUILD_DRAG_PAN_FACTOR
+			var drag_delta := motion.relative.limit_length(BUILD_DRAG_MAX_MOUSE_DELTA)
+			_build_camera_pan.x -= drag_delta.x * _build_drag_pan_factor
+			_build_camera_pan.z += drag_delta.y * _build_drag_pan_factor
+
+
+func _apply_build_camera_rotation() -> void:
+	camera.rotation = Vector3(BUILD_CAMERA_TOPDOWN_PITCH_RAD, 0.0, 0.0)
 
 
 func _is_mouse_over_build_ui() -> bool:
