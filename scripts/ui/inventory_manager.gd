@@ -206,3 +206,87 @@ func swap_slots(from_is_hotbar: bool, from_index: int, to_is_hotbar: bool, to_in
 	inventory_changed.emit()
 	hotbar_changed.emit()
 	return true
+
+
+func set_slot_item(is_hotbar: bool, index: int, item: Variant) -> bool:
+	if is_hotbar:
+		if index < 0 or index >= HOTBAR_SIZE:
+			return false
+		hotbar[index] = item
+		hotbar_changed.emit()
+		return true
+	if index < 0 or index >= INVENTORY_SIZE:
+		return false
+	inventory[index] = item
+	inventory_changed.emit()
+	return true
+
+
+func move_stack_between_sections(from_is_hotbar: bool, from_index: int) -> bool:
+	if from_is_hotbar:
+		if from_index < 0 or from_index >= HOTBAR_SIZE:
+			return false
+		if hotbar[from_index] == null:
+			return false
+		var moving: Dictionary = (hotbar[from_index] as Dictionary).duplicate(true)
+		var remaining := int(moving.get("count", 0))
+		remaining = _merge_into_section(inventory, str(moving.get("id", "")), remaining)
+		if remaining > 0:
+			remaining = _fill_empty_in_section(inventory, str(moving.get("id", "")), remaining)
+		if remaining <= 0:
+			hotbar[from_index] = null
+		else:
+			hotbar[from_index]["count"] = remaining
+		inventory_changed.emit()
+		hotbar_changed.emit()
+		return true
+
+	if from_index < 0 or from_index >= INVENTORY_SIZE:
+		return false
+	if inventory[from_index] == null:
+		return false
+	var moving2: Dictionary = (inventory[from_index] as Dictionary).duplicate(true)
+	var remaining2 := int(moving2.get("count", 0))
+	remaining2 = _merge_into_section(hotbar, str(moving2.get("id", "")), remaining2)
+	if remaining2 > 0:
+		remaining2 = _fill_empty_in_section(hotbar, str(moving2.get("id", "")), remaining2)
+	if remaining2 <= 0:
+		inventory[from_index] = null
+	else:
+		inventory[from_index]["count"] = remaining2
+	inventory_changed.emit()
+	hotbar_changed.emit()
+	return true
+
+
+func _merge_into_section(section: Array, item_id: String, count: int) -> int:
+	var remaining := count
+	for i in range(section.size()):
+		if section[i] == null:
+			continue
+		if str(section[i].get("id", "")) != item_id:
+			continue
+		var current := int(section[i].get("count", 0))
+		if current >= MAX_STACK:
+			continue
+		var add := mini(remaining, MAX_STACK - current)
+		section[i]["count"] = current + add
+		remaining -= add
+		if remaining <= 0:
+			return 0
+	return remaining
+
+
+func _fill_empty_in_section(section: Array, item_id: String, count: int) -> int:
+	var remaining := count
+	if remaining <= 0:
+		return 0
+	for i in range(section.size()):
+		if section[i] != null:
+			continue
+		var add := mini(remaining, MAX_STACK)
+		section[i] = {"id": item_id, "count": add}
+		remaining -= add
+		if remaining <= 0:
+			return 0
+	return remaining

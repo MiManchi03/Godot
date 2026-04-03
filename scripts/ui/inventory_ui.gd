@@ -19,6 +19,7 @@ var dragging: bool = false
 var drag_from_is_hotbar: bool = false
 var drag_from_index: int = -1
 var drag_preview: PanelContainer
+var carried_item: Dictionary = {}
 
 var inv_manager: Node
 var is_open: bool = false
@@ -198,9 +199,11 @@ func _create_slot(index: int, is_hotbar: bool) -> PanelContainer:
 func _process(_delta: float) -> void:
 	_update_display()
 	_update_tooltip()
-	if dragging and drag_preview:
+	if dragging and is_open and drag_preview:
 		drag_preview.visible = true
 		drag_preview.position = get_viewport().get_mouse_position() - Vector2(SLOT_SIZE * 0.5, SLOT_SIZE * 0.5)
+	elif drag_preview:
+		drag_preview.visible = false
 
 
 func _update_display() -> void:
@@ -271,6 +274,15 @@ func _start_drag(is_hotbar: bool, index: int) -> void:
 	dragging = true
 	drag_from_is_hotbar = is_hotbar
 	drag_from_index = index
+	carried_item = item.duplicate(true)
+	inv_manager.set_slot_item(is_hotbar, index, null)
+	_update_drag_preview(carried_item)
+
+
+func _update_drag_preview(item: Dictionary) -> void:
+	if item.is_empty():
+		drag_preview.visible = false
+		return
 	var preview_content: Control = drag_preview.get_child(0) as Control
 	var icon_label: Label = preview_content.get_node("Icon") as Label
 	var icon_tex: TextureRect = preview_content.get_node("IconTex") as TextureRect
@@ -291,17 +303,95 @@ func _stop_drag() -> void:
 	dragging = false
 	drag_from_is_hotbar = false
 	drag_from_index = -1
+	carried_item = {}
 	drag_preview.visible = false
 
 
 func _try_drop_to_slot(is_hotbar: bool, index: int) -> void:
 	if not dragging or not inv_manager:
 		return
-	if drag_from_is_hotbar == is_hotbar and drag_from_index == index:
+	if carried_item.is_empty():
 		_stop_drag()
 		return
-	inv_manager.swap_slots(drag_from_is_hotbar, drag_from_index, is_hotbar, index)
-	_stop_drag()
+	var target := _get_item_by_slot(is_hotbar, index)
+	if target.is_empty():
+		inv_manager.set_slot_item(is_hotbar, index, carried_item.duplicate(true))
+		_stop_drag()
+		return
+	if str(target.get("id", "")) == str(carried_item.get("id", "")):
+		var target_count := int(target.get("count", 0))
+		var carry_count := int(carried_item.get("count", 0))
+		var add := mini(64 - target_count, carry_count)
+		target_count += add
+		carry_count -= add
+		target["count"] = target_count
+		inv_manager.set_slot_item(is_hotbar, index, target)
+		if carry_count <= 0:
+			_stop_drag()
+		else:
+			carried_item["count"] = carry_count
+			_update_drag_preview(carried_item)
+		return
+	inv_manager.set_slot_item(is_hotbar, index, carried_item.duplicate(true))
+	carried_item = target.duplicate(true)
+	_update_drag_preview(carried_item)
+
+
+func _split_pick_amount(count: int) -> int:
+	if count <= 1:
+		return count
+	return int(ceil(float(count) * 0.5))
+
+
+func _take_from_slot(is_hotbar: bool, index: int, take_count: int) -> Dictionary:
+	var item := _get_item_by_slot(is_hotbar, index)
+	if item.is_empty():
+		return {}
+	var count := int(item.get("count", 0))
+	if count <= 0:
+		return {}
+	var actual := mini(take_count, count)
+	var taken := {"id": str(item.get("id", "")), "count": actual}
+	count -= actual
+	if count <= 0:
+		inv_manager.set_slot_item(is_hotbar, index, null)
+	else:
+		item["count"] = count
+		inv_manager.set_slot_item(is_hotbar, index, item)
+	return taken
+
+
+func _merge_carried_into_slot(is_hotbar: bool, index: int, place_count: int) -> void:
+	if carried_item.is_empty():
+		return
+	var target := _get_item_by_slot(is_hotbar, index)
+	var carry_id := str(carried_item.get("id", ""))
+	var carry_count := int(carried_item.get("count", 0))
+	if carry_count <= 0:
+		_stop_drag()
+		return
+	var place := mini(place_count, carry_count)
+	if target.is_empty():
+		inv_manager.set_slot_item(is_hotbar, index, {"id": carry_id, "count": place})
+		carry_count -= place
+	elif str(target.get("id", "")) == carry_id:
+		var target_count := int(target.get("count", 0))
+		var can_add := mini(64 - target_count, place)
+		if can_add > 0:
+			target["count"] = target_count + can_add
+			inv_manager.set_slot_item(is_hotbar, index, target)
+			carry_count -= can_add
+	else:
+		if place_count >= carry_count:
+			inv_manager.set_slot_item(is_hotbar, index, carried_item.duplicate(true))
+			carried_item = target.duplicate(true)
+			_update_drag_preview(carried_item)
+			return
+	if carry_count <= 0:
+		_stop_drag()
+	else:
+		carried_item["count"] = carry_count
+		_update_drag_preview(carried_item)
 
 
 func _update_tooltip() -> void:
@@ -372,14 +462,44 @@ func toggle() -> void:
 func _input(event: InputEvent) -> void:
 	if not is_open:
 		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
+		if not mouse_event.pressed:
+			return
 		var hit := _slot_at_mouse(mouse_event.position)
-		if mouse_event.pressed:
-			if bool(hit.get("found", false)):
-				_start_drag(bool(hit["is_hotbar"]), int(hit["index"]))
-		else:
-			if dragging and bool(hit.get("found", false)):
-				_try_drop_to_slot(bool(hit["is_hotbar"]), int(hit["index"]))
-			elif dragging:
-				_stop_drag()
+		if not bool(hit.get("found", false)):
+			return
+		var is_hotbar := bool(hit["is_hotbar"])
+		var index := int(hit["index"])
+		var ctrl := mouse_event.ctrl_pressed
+
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			if ctrl:
+				if inv_manager:
+					inv_manager.move_stack_between_sections(is_hotbar, index)
+				return
+			if carried_item.is_empty():
+				var picked := _take_from_slot(is_hotbar, index, 9999)
+				if not picked.is_empty():
+					dragging = true
+					carried_item = picked
+					_update_drag_preview(carried_item)
+			else:
+				_merge_carried_into_slot(is_hotbar, index, int(carried_item.get("count", 0)))
+			return
+
+		if mouse_event.button_index == MOUSE_BUTTON_RIGHT:
+			if carried_item.is_empty():
+				var source_item := _get_item_by_slot(is_hotbar, index)
+				if source_item.is_empty():
+					return
+				var take_n := 1
+				if ctrl:
+					take_n = _split_pick_amount(int(source_item.get("count", 0)))
+				var picked2 := _take_from_slot(is_hotbar, index, take_n)
+				if not picked2.is_empty():
+					dragging = true
+					carried_item = picked2
+					_update_drag_preview(carried_item)
+			else:
+				_merge_carried_into_slot(is_hotbar, index, 1)
