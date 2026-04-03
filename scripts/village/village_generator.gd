@@ -1,6 +1,8 @@
 extends RefCounted
 class_name VillageGenerator
 
+const VILLAGER_SCRIPT := preload("res://scripts/npc/villager.gd")
+
 enum VillageScale {
 	SMALL,
 	MEDIUM,
@@ -18,6 +20,7 @@ enum BuildingType {
 	BARRACK,
 	CAMPFIRE,
 	FENCE_POST,
+	ROAD,
 }
 
 const KENNEY_BUILDING_SCENE_PATHS := {
@@ -170,6 +173,9 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		building.rotate_y(rng.randf_range(0.0, TAU))
 		village.add_child(building)
 
+	var road_cells: Dictionary = {}
+	_generate_village_roads(village, layout_positions, footprint_radius, road_cells, type_counts)
+
 	var campfire := _create_campfire()
 	_tag_building_identity(campfire, BuildingType.CAMPFIRE, type_counts)
 	campfire.position = village_center_offset
@@ -184,6 +190,8 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		post.position = Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
 		post.rotate_y(rng.randf_range(0.0, TAU))
 		village.add_child(post)
+
+	_spawn_villagers(village, rng, building_count, road_cells, layout_positions)
 
 	return village
 
@@ -275,6 +283,8 @@ func _create_building_variant(rng: RandomNumberGenerator, building_type: Buildin
 			return _create_campfire()
 		BuildingType.FENCE_POST:
 			return _create_fence_post()
+		BuildingType.ROAD:
+			return _create_road_tile_variant(rng)
 		_:
 			return _create_house_variant(rng)
 
@@ -325,6 +335,8 @@ func _building_type_name(building_type: BuildingType) -> String:
 			return "Campfire"
 		BuildingType.FENCE_POST:
 			return "FencePost"
+		BuildingType.ROAD:
+			return "Road"
 		_:
 			return "Building"
 
@@ -351,6 +363,8 @@ func _building_type_id(building_type: BuildingType) -> String:
 			return "campfire"
 		BuildingType.FENCE_POST:
 			return "fencepost"
+		BuildingType.ROAD:
+			return "road"
 		_:
 			return ""
 
@@ -678,6 +692,132 @@ func _create_fence_post() -> Node3D:
 	_add_cylinder_collision(post, 0.14, 1.1, Vector3(0.0, 0.55, 0.0))
 
 	return post
+
+
+func _create_road_tile_variant(rng: RandomNumberGenerator) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Road"
+
+	var base := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(1.0, 0.08, 1.0)
+	base.mesh = mesh
+	base.position = Vector3(0.0, 0.04, 0.0)
+	var tint := 0.52 + rng.randf_range(-0.04, 0.06)
+	base.material_override = _material(Color(tint, tint * 0.96, tint * 0.88))
+	root.add_child(base)
+
+	var edge := MeshInstance3D.new()
+	var edge_mesh := BoxMesh.new()
+	edge_mesh.size = Vector3(0.94, 0.02, 0.94)
+	edge.mesh = edge_mesh
+	edge.position = Vector3(0.0, 0.09, 0.0)
+	edge.material_override = _material(Color(0.65, 0.63, 0.56))
+	root.add_child(edge)
+
+	var lane := MeshInstance3D.new()
+	var lane_mesh := BoxMesh.new()
+	lane_mesh.size = Vector3(0.28, 0.015, 0.86)
+	lane.mesh = lane_mesh
+	lane.position = Vector3(0.0, 0.1, 0.0)
+	lane.material_override = _material(Color(0.76, 0.72, 0.58))
+	root.add_child(lane)
+
+	_add_box_collision(root, Vector3(1.0, 0.12, 1.0), Vector3(0.0, 0.06, 0.0))
+	root.set_meta("road", true)
+	return root
+
+
+func _v3_to_cell(v: Vector3) -> Vector2i:
+	return Vector2i(roundi(v.x), roundi(v.z))
+
+
+func _cell_to_v3(cell: Vector2i) -> Vector3:
+	return Vector3(float(cell.x), 0.0, float(cell.y))
+
+
+func _add_road_cell(village: Node3D, cell: Vector2i, road_cells: Dictionary, type_counts: Dictionary) -> void:
+	if road_cells.has(cell):
+		return
+	var road_rng := RandomNumberGenerator.new()
+	road_rng.seed = int(hash("road|%d|%d" % [cell.x, cell.y]))
+	var road := _create_road_tile_variant(road_rng)
+	_tag_building_identity(road, BuildingType.ROAD, type_counts)
+	road.position = _cell_to_v3(cell)
+	village.add_child(road)
+	road_cells[cell] = true
+
+
+func _add_road_line(village: Node3D, from_cell: Vector2i, to_cell: Vector2i, road_cells: Dictionary, type_counts: Dictionary) -> void:
+	var x := from_cell.x
+	var y := from_cell.y
+	while x != to_cell.x:
+		_add_road_cell(village, Vector2i(x, y), road_cells, type_counts)
+		x += 1 if to_cell.x > x else -1
+	while y != to_cell.y:
+		_add_road_cell(village, Vector2i(x, y), road_cells, type_counts)
+		y += 1 if to_cell.y > y else -1
+	_add_road_cell(village, Vector2i(x, y), road_cells, type_counts)
+
+
+func _generate_village_roads(village: Node3D, layout_positions: Array[Vector3], footprint_radius: float, road_cells: Dictionary, type_counts: Dictionary) -> void:
+	var center := Vector2i.ZERO
+	_add_road_cell(village, center, road_cells, type_counts)
+
+	var ordered_cells: Array[Vector2i] = []
+	for p in layout_positions:
+		ordered_cells.append(_v3_to_cell(p))
+
+	ordered_cells.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return a.length_squared() < b.length_squared()
+	)
+
+	var connect_count := mini(ordered_cells.size(), maxi(3, int(footprint_radius * 0.45)))
+	for i in range(connect_count):
+		var target := ordered_cells[i]
+		_add_road_line(village, center, target, road_cells, type_counts)
+
+	for i in range(1, connect_count, 2):
+		_add_road_line(village, ordered_cells[i - 1], ordered_cells[i], road_cells, type_counts)
+
+
+func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_count: int, road_cells: Dictionary, layout_positions: Array[Vector3]) -> void:
+	var villager_count := mini(7, maxi(2, 2 + int(building_count / 3)))
+	for i in range(villager_count):
+		var villager := CharacterBody3D.new()
+		villager.name = "Villager_%02d" % [i + 1]
+		var body := MeshInstance3D.new()
+		var body_mesh := CapsuleMesh.new()
+		body_mesh.radius = 0.32
+		body_mesh.height = 1.15
+		body.mesh = body_mesh
+		body.position = Vector3(0.0, 0.95, 0.0)
+		body.material_override = _material(Color(0.82, 0.74, 0.62).lerp(Color(0.45, 0.62, 0.78), rng.randf()))
+		villager.add_child(body)
+
+		var mark := Label3D.new()
+		mark.name = "RoadHint"
+		mark.text = "?"
+		mark.position = Vector3(0.0, 2.2, 0.0)
+		mark.visible = false
+		mark.pixel_size = 0.03
+		mark.outline_size = 12
+		mark.modulate = Color(1.0, 0.92, 0.18, 1.0)
+		mark.no_depth_test = true
+		mark.render_priority = 5
+		villager.add_child(mark)
+
+		var road_keys: Array[Vector2i] = []
+		for k in road_cells.keys():
+			road_keys.append(k as Vector2i)
+		var start_cell := Vector2i.ZERO
+		if not road_cells.is_empty():
+			start_cell = road_keys[rng.randi_range(0, road_keys.size() - 1)]
+		villager.position = _cell_to_v3(start_cell) + Vector3(rng.randf_range(-0.12, 0.12), 0.0, rng.randf_range(-0.12, 0.12))
+		villager.set_script(VILLAGER_SCRIPT)
+		villager.set("road_cells", road_keys)
+		villager.set("building_targets", layout_positions)
+		village.add_child(villager)
 
 
 func _create_well() -> Node3D:

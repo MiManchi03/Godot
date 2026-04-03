@@ -255,6 +255,8 @@ func _build_id_from_node_name(node_name: String) -> String:
 		return "campfire"
 	if lower.find("fencepost") != -1 or lower.find("fence_post") != -1 or lower.find("fence") != -1:
 		return "fencepost"
+	if lower.find("road") != -1:
+		return "road"
 	if lower.find("farm") != -1:
 		return "farm"
 	if lower.find("tower") != -1:
@@ -280,6 +282,8 @@ func _building_type_from_id(build_id: String) -> int:
 			return VillageGenerator.BuildingType.CAMPFIRE
 		"fencepost":
 			return VillageGenerator.BuildingType.FENCE_POST
+		"road":
+			return VillageGenerator.BuildingType.ROAD
 		"farm":
 			return VillageGenerator.BuildingType.FARM
 		"tower":

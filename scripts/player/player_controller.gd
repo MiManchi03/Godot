@@ -106,13 +106,30 @@ var _build_zoom_slider: VSlider
 var _build_zoom_value_label: Label
 var _build_selected_id: String = ""
 var _build_buttons_by_id: Dictionary = {}
-var _build_preview_root: Node3D
-var _build_preview_rotation_deg: float = 0.0
-var _build_preview_valid: bool = false
-var _build_preview_variant_seed: int = 0
+var _build_preview: BuildPreviewController
 var _build_forced_variant_seed: int = 0
 var _build_village_generator: VillageGenerator
 var _build_rng := RandomNumberGenerator.new()
+var _build_road_painting: bool = false
+var _build_road_painted_cells: Dictionary = {}
+var _build_road_painted_any: bool = false
+var _build_rotating_target: Node3D
+var _build_rotating_original_y: float = 0.0
+var _build_rotating_dragging: bool = false
+var _build_rotate_gizmo: RotateGizmo
+var _build_rotate_knob_rect: Rect2 = Rect2()
+var _build_rotate_center_screen: Vector2 = Vector2.ZERO
+var _build_rotate_local_center: Vector3 = Vector3.ZERO
+var _build_rotate_local_half_x: float = 0.0
+var _build_rotate_local_half_z: float = 0.0
+var _build_rotate_bounds_valid: bool = false
+var _build_picked_original: Node3D
+var _build_picked_original_build_id: String = ""
+var _build_picked_original_name: String = ""
+var _build_picked_original_pos: Vector3 = Vector3.ZERO
+var _build_picked_original_rot: float = 0.0
+var _build_picked_original_was_player_placed: bool = false
+var _build_picked_original_collision: Array[Dictionary] = []
 
 const BUILDING_DEFS := [
 	{"id": "house", "label": "房屋", "emoji": "🏠", "type": VillageGenerator.BuildingType.HOUSE},
@@ -122,10 +139,17 @@ const BUILDING_DEFS := [
 	{"id": "well", "label": "水井", "emoji": "🪣", "type": VillageGenerator.BuildingType.WELL},
 	{"id": "campfire", "label": "篝火", "emoji": "🔥", "type": VillageGenerator.BuildingType.CAMPFIRE},
 	{"id": "fencepost", "label": "围栏桩", "emoji": "🪵", "type": VillageGenerator.BuildingType.FENCE_POST},
+	{"id": "road", "label": "道路", "emoji": "🛣️", "type": VillageGenerator.BuildingType.ROAD},
 	{"id": "farm", "label": "农场", "emoji": "🌾", "type": VillageGenerator.BuildingType.FARM},
 	{"id": "tower", "label": "塔楼", "emoji": "🗼", "type": VillageGenerator.BuildingType.TOWER},
 	{"id": "barrack", "label": "兵营", "emoji": "⚔️", "type": VillageGenerator.BuildingType.BARRACK},
 ]
+const BUILD_ROTATE_KNOB_SIZE: Vector2 = Vector2(26.0, 26.0)
+const BUILD_ROTATE_ORBIT_MIN_RADIUS_PX: float = 20.0
+const BUILD_ROTATE_ORBIT_MAX_RADIUS_PX: float = 240.0
+const BUILD_ROTATE_ORBIT_PADDING_MIN_PX: float = 2.0
+const BUILD_ROTATE_ORBIT_PADDING_MAX_PX: float = 10.0
+const BUILD_ROTATE_ORBIT_PADDING_REF_PX: float = 140.0
 
 func _ready() -> void:
 	print("=== PLAYER SCRIPT LOADED ===")
@@ -133,6 +157,8 @@ func _ready() -> void:
 	apply_camera_settings()
 	_setup_destroy_ui()
 	_setup_build_mode_ui()
+	_build_preview = BuildPreviewController.new()
+	add_child(_build_preview)
 	_build_village_generator = VillageGenerator.new(base_seed())
 	_build_rng.seed = base_seed() ^ 0x88D1
 	
@@ -251,6 +277,17 @@ func _setup_build_mode_ui() -> void:
 	_build_zoom_value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	right_vbox.add_child(_build_zoom_value_label)
 	_update_build_zoom_label()
+
+	var gizmo_script := preload("res://scripts/ui/rotate_gizmo.gd")
+	_build_rotate_gizmo = gizmo_script.new()
+	_build_rotate_gizmo.configure(
+		BUILD_ROTATE_KNOB_SIZE,
+		3.0,
+		Color(0.26, 0.88, 0.96, 0.78),
+		Color(0.45, 0.95, 1.0, 0.98),
+		Color(0.08, 0.26, 0.3, 0.92)
+	)
+	_build_ui_root.add_child(_build_rotate_gizmo)
 
 
 func _setup_destroy_ui() -> void:
@@ -644,6 +681,10 @@ func _exit_build_mode() -> void:
 	_build_mode = false
 	visible = true
 	_build_drag_map = false
+	_build_road_painting = false
+	_build_road_painted_cells.clear()
+	_build_road_painted_any = false
+	_cancel_rotate_selection(false)
 	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager:
 		world_manager.call("save_player_buildings")
@@ -698,6 +739,7 @@ func _update_build_mode(delta: float) -> void:
 		_apply_build_camera_rotation()
 
 	_update_build_preview()
+	_update_rotate_handles()
 
 
 func _handle_build_mode_input(event: InputEvent) -> void:
@@ -705,6 +747,16 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
+			_build_rotating_dragging = false
+		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and not mouse_event.pressed:
+			_build_drag_map = false
+			return
+		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
+			_build_road_painting = false
+			_build_road_painted_cells.clear()
+			if _build_selected_id == "road" and _build_road_painted_any:
+				_cancel_build_selection()
+				_build_road_painted_any = false
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_RIGHT:
 			_build_drag_map = mouse_event.pressed and not over_build_ui
@@ -715,22 +767,20 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			if Input.is_key_pressed(KEY_CTRL):
 				_set_build_zoom(_build_camera_zoom - BUILD_ZOOM_WHEEL_STEP)
 			else:
-				_build_preview_rotation_deg += BUILD_ROTATE_STEP_DEGREES
+				if _build_preview:
+					_build_preview.preview_rotation_deg += BUILD_ROTATE_STEP_DEGREES
 			return
 
 		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			if Input.is_key_pressed(KEY_CTRL):
 				_set_build_zoom(_build_camera_zoom + BUILD_ZOOM_WHEEL_STEP)
 			else:
-				_build_preview_rotation_deg -= BUILD_ROTATE_STEP_DEGREES
+				if _build_preview:
+					_build_preview.preview_rotation_deg -= BUILD_ROTATE_STEP_DEGREES
 			return
 
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and mouse_event.pressed and not over_build_ui:
 			var now_ms := Time.get_ticks_msec()
-			if now_ms < _build_ignore_place_until_ms:
-				if BUILD_PICK_DEBUG:
-					print("[BUILD_PICK] ignore place due to cooldown")
-				return
 			var is_double_click := (
 				now_ms - _build_last_left_click_ms <= BUILD_PICK_DOUBLE_CLICK_MS
 				and mouse_event.position.distance_to(_build_last_left_click_pos) <= BUILD_PICK_DOUBLE_CLICK_DIST
@@ -743,19 +793,378 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			if is_double_click and _try_pick_existing_building_to_preview():
 				_build_ignore_place_until_ms = now_ms + 140
 				return
+			if now_ms < _build_ignore_place_until_ms:
+				if BUILD_PICK_DEBUG:
+					print("[BUILD_PICK] ignore place due to cooldown")
+				return
+			if _build_selected_id.is_empty():
+				if _handle_rotate_click(mouse_event.position):
+					return
+			if _build_selected_id == "road":
+				_build_road_painting = true
+				_build_road_painted_cells.clear()
+				_build_road_painted_any = false
 			_try_place_building()
+			if _build_selected_id == "road" and _build_preview and _build_preview.preview_root:
+				_build_road_painted_cells[_grid_cell_from_world(_build_preview.preview_root.global_position)] = true
 			return
 
 	if event is InputEventMouseMotion:
+		if _build_rotating_dragging and _build_rotating_target != null:
+			var world_pos := _mouse_ground_position()
+			var delta := world_pos - _build_rotating_target.global_position
+			delta.y = 0.0
+			if delta.length_squared() > 0.0001:
+				_build_rotating_target.rotation.y = atan2(delta.x, delta.z)
+			return
 		if _build_drag_map:
 			var motion := event as InputEventMouseMotion
 			var drag_delta := motion.relative.limit_length(BUILD_DRAG_MAX_MOUSE_DELTA)
 			_build_camera_pan.x -= drag_delta.x * _build_drag_pan_factor
 			_build_camera_pan.z += drag_delta.y * _build_drag_pan_factor
+		if _build_road_painting and _build_selected_id == "road":
+			var cell := _grid_cell_from_world(_mouse_ground_position())
+			if not _build_road_painted_cells.has(cell):
+				if _try_place_building_at(_grid_pos_from_cell(cell)):
+					_build_road_painted_cells[cell] = true
 
 
 func _apply_build_camera_rotation() -> void:
 	camera.rotation = Vector3(BUILD_CAMERA_TOPDOWN_PITCH_RAD, 0.0, 0.0)
+
+
+func _update_rotate_handles() -> void:
+	if _build_rotate_gizmo == null:
+		return
+	if _build_rotating_target == null or not is_instance_valid(_build_rotating_target):
+		_build_rotate_gizmo.visible = false
+		return
+	if not camera:
+		_build_rotate_gizmo.visible = false
+		return
+	var world_center := _build_rotate_world_center(_build_rotating_target)
+	_build_rotate_center_screen = camera.unproject_position(world_center)
+	var orbit_radius := _build_rotate_orbit_radius_px(_build_rotating_target, _build_rotate_center_screen)
+	var angle := _build_rotating_target.rotation.y
+	_build_rotate_gizmo.update_gizmo(_build_rotate_center_screen, orbit_radius, angle)
+	_build_rotate_knob_rect = _build_rotate_gizmo.get_knob_rect()
+
+
+func _build_rotate_world_center(node: Node3D) -> Vector3:
+	if _build_rotate_bounds_valid and node == _build_rotating_target:
+		return node.global_transform * _build_rotate_local_center
+	return _build_visual_center_world(node)
+
+
+func _build_rotate_padding_from_distance(distance: float) -> float:
+	var t := clampf(distance / BUILD_ROTATE_ORBIT_PADDING_REF_PX, 0.0, 1.0)
+	return lerpf(BUILD_ROTATE_ORBIT_PADDING_MIN_PX, BUILD_ROTATE_ORBIT_PADDING_MAX_PX, t)
+
+
+func _stash_picked_original(target: Node3D, build_id: String, pos: Vector3, rot_y: float, was_player_placed: bool) -> void:
+	_restore_picked_original()
+	_build_picked_original = target
+	_build_picked_original_build_id = build_id
+	_build_picked_original_name = target.name
+	_build_picked_original_pos = pos
+	_build_picked_original_rot = rot_y
+	_build_picked_original_was_player_placed = was_player_placed
+	_build_picked_original_collision.clear()
+	_set_building_collision_enabled(target, false)
+	target.visible = false
+
+
+func _finalize_picked_original() -> void:
+	if _build_picked_original == null or not is_instance_valid(_build_picked_original):
+		_clear_picked_original()
+		return
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager:
+		world_manager.call(
+			"on_pick_existing_building",
+			_build_picked_original_build_id,
+			_build_picked_original_pos,
+			_build_picked_original_name,
+			_build_picked_original_was_player_placed
+		)
+	_build_picked_original.queue_free()
+	_clear_picked_original()
+
+
+func _restore_picked_original() -> void:
+	if _build_picked_original == null:
+		_clear_picked_original()
+		return
+	if not is_instance_valid(_build_picked_original):
+		_clear_picked_original()
+		return
+	_set_building_collision_enabled(_build_picked_original, true)
+	_build_picked_original.visible = true
+	_clear_picked_original()
+
+
+func _clear_picked_original() -> void:
+	_build_picked_original = null
+	_build_picked_original_build_id = ""
+	_build_picked_original_name = ""
+	_build_picked_original_pos = Vector3.ZERO
+	_build_picked_original_rot = 0.0
+	_build_picked_original_was_player_placed = false
+	_build_picked_original_collision.clear()
+
+
+func _set_building_collision_enabled(node: Node, enabled: bool) -> void:
+	if node is CollisionObject3D:
+		var body := node as CollisionObject3D
+		if not enabled:
+			_build_picked_original_collision.append({
+				"node": body,
+				"layer": body.collision_layer,
+				"mask": body.collision_mask,
+			})
+			body.collision_layer = 0
+			body.collision_mask = 0
+		else:
+			for entry_variant in _build_picked_original_collision:
+				var entry := entry_variant as Dictionary
+				var entry_node := entry.get("node") as CollisionObject3D
+				if entry_node == body:
+					body.collision_layer = int(entry.get("layer", 1))
+					body.collision_mask = int(entry.get("mask", 1))
+					break
+	for child in node.get_children():
+		_set_building_collision_enabled(child, enabled)
+
+
+func _cache_build_rotate_bounds(target: Node3D) -> void:
+	_build_rotate_bounds_valid = false
+	var meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(target, meshes)
+	if meshes.is_empty():
+		return
+	var inv := target.global_transform.affine_inverse()
+	var has_bounds := false
+	var min_v := Vector3.ZERO
+	var max_v := Vector3.ZERO
+	for m in meshes:
+		if m.mesh == null:
+			continue
+		var aabb := m.get_aabb()
+		var corners: Array[Vector3] = [
+			aabb.position,
+			aabb.position + Vector3(aabb.size.x, 0.0, 0.0),
+			aabb.position + Vector3(0.0, aabb.size.y, 0.0),
+			aabb.position + Vector3(0.0, 0.0, aabb.size.z),
+			aabb.position + Vector3(aabb.size.x, aabb.size.y, 0.0),
+			aabb.position + Vector3(aabb.size.x, 0.0, aabb.size.z),
+			aabb.position + Vector3(0.0, aabb.size.y, aabb.size.z),
+			aabb.position + aabb.size,
+		]
+		for c in corners:
+			var local_corner: Vector3 = inv * (m.global_transform * c)
+			if not has_bounds:
+				min_v = local_corner
+				max_v = local_corner
+				has_bounds = true
+			else:
+				min_v = min_v.min(local_corner)
+				max_v = max_v.max(local_corner)
+
+	if not has_bounds:
+		return
+
+	_build_rotate_local_center = (min_v + max_v) * 0.5
+	_build_rotate_local_half_x = maxf((max_v.x - min_v.x) * 0.5, 0.02)
+	_build_rotate_local_half_z = maxf((max_v.z - min_v.z) * 0.5, 0.02)
+	_build_rotate_bounds_valid = true
+
+
+func _build_rotate_orbit_radius_px(node: Node3D, screen_center: Vector2) -> float:
+	if _build_rotate_bounds_valid and node == _build_rotating_target:
+		var edge_points: Array[Vector3] = [
+			node.global_transform * (_build_rotate_local_center + Vector3(_build_rotate_local_half_x, 0.0, 0.0)),
+			node.global_transform * (_build_rotate_local_center - Vector3(_build_rotate_local_half_x, 0.0, 0.0)),
+			node.global_transform * (_build_rotate_local_center + Vector3(0.0, 0.0, _build_rotate_local_half_z)),
+			node.global_transform * (_build_rotate_local_center - Vector3(0.0, 0.0, _build_rotate_local_half_z)),
+		]
+
+		var max_distance := 0.0
+		for p in edge_points:
+			var screen_p := camera.unproject_position(p)
+			var distance := screen_p.distance_to(screen_center)
+			if distance > max_distance:
+				max_distance = distance
+
+		var radius := max_distance + _build_rotate_padding_from_distance(max_distance)
+		return clampf(radius, BUILD_ROTATE_ORBIT_MIN_RADIUS_PX, BUILD_ROTATE_ORBIT_MAX_RADIUS_PX)
+
+	var meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(node, meshes)
+	if meshes.is_empty():
+		return BUILD_ROTATE_ORBIT_MIN_RADIUS_PX
+
+	var has_bounds := false
+	var min_v := Vector3.ZERO
+	var max_v := Vector3.ZERO
+	for m in meshes:
+		if m.mesh == null:
+			continue
+		var aabb := m.get_aabb()
+		var corners: Array[Vector3] = [
+			aabb.position,
+			aabb.position + Vector3(aabb.size.x, 0.0, 0.0),
+			aabb.position + Vector3(0.0, aabb.size.y, 0.0),
+			aabb.position + Vector3(0.0, 0.0, aabb.size.z),
+			aabb.position + Vector3(aabb.size.x, aabb.size.y, 0.0),
+			aabb.position + Vector3(aabb.size.x, 0.0, aabb.size.z),
+			aabb.position + Vector3(0.0, aabb.size.y, aabb.size.z),
+			aabb.position + aabb.size,
+		]
+		for c in corners:
+			var world_corner: Vector3 = m.global_transform * c
+			if not has_bounds:
+				min_v = world_corner
+				max_v = world_corner
+				has_bounds = true
+			else:
+				min_v = min_v.min(world_corner)
+				max_v = max_v.max(world_corner)
+
+	if not has_bounds:
+		return BUILD_ROTATE_ORBIT_MIN_RADIUS_PX
+
+	var center_world := (min_v + max_v) * 0.5
+	var half_x := maxf((max_v.x - min_v.x) * 0.5, 0.02)
+	var half_z := maxf((max_v.z - min_v.z) * 0.5, 0.02)
+	var edge_points: Array[Vector3] = [
+		center_world + Vector3(half_x, 0.0, 0.0),
+		center_world - Vector3(half_x, 0.0, 0.0),
+		center_world + Vector3(0.0, 0.0, half_z),
+		center_world - Vector3(0.0, 0.0, half_z),
+	]
+
+	var max_distance := 0.0
+	for p in edge_points:
+		var screen_p := camera.unproject_position(p)
+		var distance := screen_p.distance_to(screen_center)
+		if distance > max_distance:
+			max_distance = distance
+
+	var radius := max_distance + _build_rotate_padding_from_distance(max_distance)
+	return clampf(radius, BUILD_ROTATE_ORBIT_MIN_RADIUS_PX, BUILD_ROTATE_ORBIT_MAX_RADIUS_PX)
+
+
+func _build_visual_center_world(node: Node3D) -> Vector3:
+	var meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(node, meshes)
+	if meshes.is_empty():
+		return node.global_position + Vector3(0.0, 1.0, 0.0)
+
+	var has_bounds := false
+	var min_v := Vector3.ZERO
+	var max_v := Vector3.ZERO
+	for m in meshes:
+		if m.mesh == null:
+			continue
+		var aabb := m.get_aabb()
+		var corners: Array[Vector3] = [
+			aabb.position,
+			aabb.position + Vector3(aabb.size.x, 0.0, 0.0),
+			aabb.position + Vector3(0.0, aabb.size.y, 0.0),
+			aabb.position + Vector3(0.0, 0.0, aabb.size.z),
+			aabb.position + Vector3(aabb.size.x, aabb.size.y, 0.0),
+			aabb.position + Vector3(aabb.size.x, 0.0, aabb.size.z),
+			aabb.position + Vector3(0.0, aabb.size.y, aabb.size.z),
+			aabb.position + aabb.size,
+		]
+		for c in corners:
+			var w: Vector3 = m.global_transform * c
+			if not has_bounds:
+				min_v = w
+				max_v = w
+				has_bounds = true
+			else:
+				min_v = min_v.min(w)
+				max_v = max_v.max(w)
+
+	if not has_bounds:
+		return node.global_position + Vector3(0.0, 1.0, 0.0)
+	return (min_v + max_v) * 0.5
+
+
+func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
+	if node is MeshInstance3D:
+		out.append(node as MeshInstance3D)
+	for child in node.get_children():
+		_collect_mesh_instances(child, out)
+
+
+func _handle_rotate_click(mouse_pos: Vector2) -> bool:
+	if _build_rotating_target != null and is_instance_valid(_build_rotating_target):
+		if _build_rotate_knob_rect.has_point(mouse_pos):
+			_build_rotating_dragging = true
+			return true
+
+	var clicked := _pick_building_by_mouse(mouse_pos)
+	if clicked != null:
+		if _build_rotating_target == clicked:
+			_confirm_rotate_selection()
+			return true
+		_begin_rotate_selection(clicked)
+		return true
+
+	if _build_rotating_target != null:
+		_cancel_rotate_selection(true)
+		return true
+
+	return false
+
+
+func _pick_building_by_mouse(mouse_pos: Vector2) -> Node3D:
+	if not camera:
+		return null
+	var origin := camera.project_ray_origin(mouse_pos)
+	var direction := camera.project_ray_normal(mouse_pos)
+	var ray := PhysicsRayQueryParameters3D.create(origin, origin + direction * 500.0)
+	ray.collide_with_areas = false
+	ray.collide_with_bodies = true
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	if hit.is_empty():
+		return null
+	return _find_building_root_from_collider(hit.get("collider"))
+
+
+func _begin_rotate_selection(target: Node3D) -> void:
+	_cancel_build_selection()
+	_build_rotating_target = target
+	_build_rotating_original_y = target.rotation.y
+	_build_rotating_dragging = false
+	_cache_build_rotate_bounds(target)
+
+
+func _confirm_rotate_selection() -> void:
+	if _build_rotating_target == null or not is_instance_valid(_build_rotating_target):
+		_cancel_rotate_selection(false)
+		return
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager:
+		var build_id := _resolve_build_id(_build_rotating_target)
+		if build_id.is_empty():
+			_cancel_rotate_selection(false)
+			return
+		world_manager.call("on_pick_existing_building", build_id, _build_rotating_target.global_position, _build_rotating_target.name, bool(_build_rotating_target.get_meta("player_placed", false)))
+		world_manager.call("add_player_building", build_id, _build_rotating_target.global_position, _build_rotating_target.rotation.y, _build_rotating_target.name, int(_build_rotating_target.get_meta("variant_seed", 0)))
+	_cancel_rotate_selection(false)
+
+
+func _cancel_rotate_selection(restore_rotation: bool) -> void:
+	if restore_rotation and _build_rotating_target != null and is_instance_valid(_build_rotating_target):
+		_build_rotating_target.rotation.y = _build_rotating_original_y
+	_build_rotating_target = null
+	_build_rotating_dragging = false
+	_build_rotate_bounds_valid = false
+	if _build_rotate_gizmo:
+		_build_rotate_gizmo.visible = false
 
 
 func _is_mouse_over_build_ui() -> bool:
@@ -816,24 +1225,32 @@ func _on_building_button_input(event: InputEvent, build_id: String) -> void:
 	if mouse_event.double_click:
 		_select_building(build_id)
 		return
-	if _build_selected_id == build_id and _build_preview_root != null:
+	if _build_selected_id == build_id and _build_picked_original != null:
+		_finalize_picked_original()
+		_cancel_build_selection()
+		return
+	if _build_selected_id == build_id and (_build_preview and _build_preview.preview_root != null):
 		_cancel_build_selection()
 	else:
 		_select_building(build_id)
 
 
 func _select_building(build_id: String) -> void:
+	_cancel_rotate_selection(false)
 	_build_selected_id = build_id
 	_refresh_build_button_highlight()
 	_spawn_build_preview()
 
 
 func _cancel_build_selection() -> void:
-	if _build_preview_root:
-		_build_preview_root.queue_free()
-		_build_preview_root = null
+	if _build_preview:
+		_build_preview.clear_preview()
 	_build_selected_id = ""
-	_build_preview_variant_seed = 0
+	_build_road_painting = false
+	_build_road_painted_cells.clear()
+	_build_road_painted_any = false
+	_restore_picked_original()
+	_cancel_rotate_selection(false)
 	_refresh_build_button_highlight()
 
 
@@ -883,9 +1300,9 @@ func _apply_build_button_style(btn: Button, is_selected: bool) -> void:
 
 
 func _spawn_build_preview() -> void:
-	if _build_preview_root:
-		_build_preview_root.queue_free()
-		_build_preview_root = null
+	if _build_preview == null:
+		return
+	_build_preview.clear_preview()
 
 	if _build_selected_id.is_empty():
 		return
@@ -894,24 +1311,13 @@ func _spawn_build_preview() -> void:
 	if type == -1:
 		return
 
+	var variant_seed := 0
 	if _build_forced_variant_seed != 0:
-		_build_preview_variant_seed = _build_forced_variant_seed
+		variant_seed = _build_forced_variant_seed
 	else:
-		_build_preview_variant_seed = int(_build_rng.randi())
+		variant_seed = int(_build_rng.randi())
 	_build_forced_variant_seed = 0
-
-	var preview_rng := RandomNumberGenerator.new()
-	preview_rng.seed = _build_preview_variant_seed
-	var preview := _build_village_generator._create_building_variant(preview_rng, type)
-	if preview == null:
-		return
-
-	preview.name = "BuildPreview"
-	preview.set_meta("build_id", _build_selected_id)
-	preview.set_meta("variant_seed", _build_preview_variant_seed)
-	get_parent().add_child(preview)
-	_build_preview_root = preview
-	_build_preview_rotation_deg = 0.0
+	_build_preview.spawn_preview(get_parent(), _build_selected_id, type, _build_village_generator, variant_seed)
 
 
 func _building_type_from_id(build_id: String) -> int:
@@ -943,6 +1349,8 @@ func _build_id_from_node_name(node_name: String) -> String:
 		return "campfire"
 	if lower.find("fencepost") != -1 or lower.find("fence_post") != -1 or lower.find("fence") != -1:
 		return "fencepost"
+	if lower.find("road") != -1:
+		return "road"
 	if lower.find("farm") != -1:
 		return "farm"
 	if lower.find("tower") != -1:
@@ -965,6 +1373,8 @@ func _build_id_from_node_name(node_name: String) -> String:
 			return "campfire"
 		"FencePost", "Fence_Post":
 			return "fencepost"
+		"Road":
+			return "road"
 		"Farm", "FarmPlot":
 			return "farm"
 		"Tower":
@@ -980,6 +1390,10 @@ func _find_building_root_from_collider(collider: Object) -> Node3D:
 		return null
 	var current: Node = collider as Node
 	while current != null:
+		if _build_preview and _build_preview.preview_root:
+			var preview_root := _build_preview.preview_root
+			if current == preview_root or preview_root.is_ancestor_of(current):
+				return null
 		if current is Node3D:
 			var build_id := _resolve_build_id(current as Node3D)
 			if not build_id.is_empty():
@@ -991,7 +1405,7 @@ func _find_building_root_from_collider(collider: Object) -> Node3D:
 func _collect_building_roots(node: Node, out: Array[Node3D]) -> void:
 	if node is Node3D:
 		var node3d := node as Node3D
-		if node3d != _build_preview_root:
+		if _build_preview == null or node3d != _build_preview.preview_root:
 			var build_id := _resolve_build_id(node3d)
 			if not build_id.is_empty():
 				out.append(node3d)
@@ -1097,16 +1511,14 @@ func _try_pick_existing_building_to_preview() -> bool:
 	var picked_rot := building_root.rotation.y
 	var picked_variant_seed := int(building_root.get_meta("variant_seed", 0))
 	var was_player_placed := bool(building_root.get_meta("player_placed", false))
-	var world_manager := get_node_or_null("/root/World/WorldManager")
-	if world_manager:
-		world_manager.call("on_pick_existing_building", build_id, picked_pos, building_root.name, was_player_placed)
-	building_root.queue_free()
+	_cancel_rotate_selection(false)
+	_stash_picked_original(building_root, build_id, picked_pos, picked_rot, was_player_placed)
 	_build_forced_variant_seed = picked_variant_seed
 	_select_building(build_id)
-	if _build_preview_root:
-		_build_preview_root.global_position = picked_pos
-		_build_preview_rotation_deg = rad_to_deg(picked_rot)
-		_build_preview_root.rotation.y = picked_rot
+	if _build_preview and _build_preview.preview_root:
+		_build_preview.preview_root.global_position = picked_pos
+		_build_preview.preview_rotation_deg = rad_to_deg(picked_rot)
+		_build_preview.preview_root.rotation.y = picked_rot
 		if BUILD_PICK_DEBUG:
 			print("[BUILD_PICK] success: picked and converted to preview")
 		return true
@@ -1128,88 +1540,50 @@ func _mouse_ground_position() -> Vector3:
 	return origin + dir * t
 
 
-func _set_preview_tint(node: Node, color: Color) -> void:
-	if node is MeshInstance3D:
-		var mesh_instance := node as MeshInstance3D
-		var overlay := StandardMaterial3D.new()
-		overlay.albedo_color = color
-		overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mesh_instance.material_overlay = overlay
-	for child in node.get_children():
-		_set_preview_tint(child, color)
-
-
-func _preview_overlaps() -> bool:
-	if not _build_preview_root:
-		return true
-	var state := get_world_3d().direct_space_state
-	var q := PhysicsShapeQueryParameters3D.new()
-	for child in _build_preview_root.get_children():
-		if child is StaticBody3D:
-			var body := child as StaticBody3D
-			for shape_child in body.get_children():
-				if shape_child is CollisionShape3D:
-					var col := shape_child as CollisionShape3D
-					if col.shape == null:
-						continue
-					q.shape = col.shape
-					q.transform = body.global_transform * Transform3D(Basis.IDENTITY, col.position)
-					q.collide_with_areas = false
-					q.collide_with_bodies = true
-					var hits := state.intersect_shape(q, 4)
-					for hit in hits:
-						var collider = hit.get("collider")
-						if collider == null:
-							continue
-						if _build_preview_root.is_ancestor_of(collider):
-							continue
-						if collider is Node and (collider as Node).name == "Ground":
-							continue
-						return true
-	return false
-
-
 func _update_build_preview() -> void:
-	if not _build_preview_root:
+	if _build_preview == null:
 		return
-	var pos := _mouse_ground_position()
-	if pos == Vector3.ZERO:
-		_build_preview_valid = false
-		_set_preview_tint(_build_preview_root, Color(0.9, 0.2, 0.2, 0.7))
-		return
-	_build_preview_root.global_position = pos
-	_build_preview_root.rotation.y = deg_to_rad(_build_preview_rotation_deg)
-	var invalid := _preview_overlaps()
-	_build_preview_valid = not invalid
-	_set_preview_tint(_build_preview_root, Color(0.9, 0.2, 0.2, 0.7) if invalid else Color(0.5, 1.0, 0.5, 0.8))
+	_build_preview.update_preview(camera, _build_selected_id)
 
 
 func _try_place_building() -> void:
-	if not _build_preview_root or not _build_preview_valid:
+	if _build_preview == null or _build_preview.preview_root == null:
 		return
+	_try_place_building_at(_build_preview.preview_root.global_position)
+
+
+func _try_place_building_at(place_pos: Vector3) -> bool:
+	if _build_preview == null or _build_preview.preview_root == null:
+		return false
 	var type := _building_type_from_id(_build_selected_id)
 	if type == -1:
-		return
+		return false
 	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager == null:
-		return
-	var placed_variant = world_manager.call(
-		"spawn_player_building",
-		_build_selected_id,
-		_build_preview_root.global_position,
-		_build_preview_root.rotation.y,
-		_build_preview_variant_seed
-	)
-	if placed_variant == null:
-		return
-	var placed := placed_variant as Node3D
+		return false
+	_build_preview.preview_root.global_position = place_pos
+	var placed := _build_preview.try_place(world_manager, _build_selected_id)
 	if placed == null:
-		return
-	world_manager.call("add_player_building", _build_selected_id, placed.global_position, placed.rotation.y, placed.name, _build_preview_variant_seed)
+		return false
+	_finalize_picked_original()
+	if _build_selected_id == "road":
+		_build_road_painted_any = true
 
-	# Place once, then clear current selection/preview.
+	if _build_selected_id == "road":
+		if _build_preview and _build_preview.preview_root:
+			_build_preview.preview_root.global_position = placed.global_position
+		return true
+
 	_cancel_build_selection()
+	return true
+
+
+func _grid_cell_from_world(world_pos: Vector3) -> Vector2i:
+	return Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+
+
+func _grid_pos_from_cell(cell: Vector2i) -> Vector3:
+	return Vector3(float(cell.x), 0.0, float(cell.y))
 
 
 func _save_camera_angle() -> void:
