@@ -21,6 +21,8 @@ config/icon="res://icon.svg"
 GameSettings="*res://scripts/game_settings.gd"
 CursorManager="*res://scripts/system/cursor_manager.gd"
 InventoryManager="*res://scripts/ui/inventory_manager.gd"
+RoadNetwork="*res://scripts/world/road_network.gd"
+VillagerSystem="*res://scripts/npc/villager_system.gd"
 
 [input]
 

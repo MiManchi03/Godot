@@ -129,7 +129,12 @@ var _build_picked_original_name: String = ""
 var _build_picked_original_pos: Vector3 = Vector3.ZERO
 var _build_picked_original_rot: float = 0.0
 var _build_picked_original_was_player_placed: bool = false
+var _build_picked_original_entity_id: String = ""
 var _build_picked_original_collision: Array[Dictionary] = []
+var _holding_villager: Node3D = null
+var _holding_villager_original_pos: Vector3 = Vector3.ZERO
+var _villager_preview: Node3D = null
+var _villager_task_ui: Control = null
 
 const BUILDING_DEFS := [
 	{"id": "house", "label": "房屋", "emoji": "🏠", "type": VillageGenerator.BuildingType.HOUSE},
@@ -157,6 +162,7 @@ func _ready() -> void:
 	apply_camera_settings()
 	_setup_destroy_ui()
 	_setup_build_mode_ui()
+	_setup_villager_task_ui()
 	_build_preview = BuildPreviewController.new()
 	add_child(_build_preview)
 	_build_village_generator = VillageGenerator.new(base_seed())
@@ -177,6 +183,15 @@ func _ready() -> void:
 
 func base_seed() -> int:
 	return 4531
+
+
+func _setup_villager_task_ui() -> void:
+	if _villager_task_ui:
+		return
+	var VillagerTaskUI := load("res://scripts/ui/villager_task_ui.gd")
+	_villager_task_ui = VillagerTaskUI.new()
+	_villager_task_ui.name = "VillagerTaskUI"
+	add_child(_villager_task_ui)
 
 
 func _setup_build_mode_ui() -> void:
@@ -740,6 +755,9 @@ func _update_build_mode(delta: float) -> void:
 
 	_update_build_preview()
 	_update_rotate_handles()
+	
+	if _holding_villager != null:
+		_update_villager_preview()
 
 
 func _handle_build_mode_input(event: InputEvent) -> void:
@@ -750,6 +768,9 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			_build_rotating_dragging = false
 		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and not mouse_event.pressed:
 			_build_drag_map = false
+			if _holding_villager != null:
+				_cancel_holding_villager()
+				return
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
 			_build_road_painting = false
@@ -790,9 +811,17 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			_build_last_left_click_ms = now_ms
 			_build_last_left_click_pos = mouse_event.position
 
-			if is_double_click and _try_pick_existing_building_to_preview():
-				_build_ignore_place_until_ms = now_ms + 140
+			if _holding_villager != null:
+				_place_held_villager()
 				return
+			
+			if is_double_click:
+				if _try_pick_villager():
+					_build_ignore_place_until_ms = now_ms + 140
+					return
+				if _try_pick_existing_building_to_preview():
+					_build_ignore_place_until_ms = now_ms + 140
+					return
 			if now_ms < _build_ignore_place_until_ms:
 				if BUILD_PICK_DEBUG:
 					print("[BUILD_PICK] ignore place due to cooldown")
@@ -869,6 +898,7 @@ func _stash_picked_original(target: Node3D, build_id: String, pos: Vector3, rot_
 	_build_picked_original_pos = pos
 	_build_picked_original_rot = rot_y
 	_build_picked_original_was_player_placed = was_player_placed
+	_build_picked_original_entity_id = str(target.get_meta("entity_id", ""))
 	_build_picked_original_collision.clear()
 	_set_building_collision_enabled(target, false)
 	target.visible = false
@@ -885,7 +915,8 @@ func _finalize_picked_original() -> void:
 			_build_picked_original_build_id,
 			_build_picked_original_pos,
 			_build_picked_original_name,
-			_build_picked_original_was_player_placed
+			_build_picked_original_was_player_placed,
+			_build_picked_original_entity_id
 		)
 	_build_picked_original.queue_free()
 	_clear_picked_original()
@@ -910,6 +941,7 @@ func _clear_picked_original() -> void:
 	_build_picked_original_pos = Vector3.ZERO
 	_build_picked_original_rot = 0.0
 	_build_picked_original_was_player_placed = false
+	_build_picked_original_entity_id = ""
 	_build_picked_original_collision.clear()
 
 
@@ -1152,7 +1184,14 @@ func _confirm_rotate_selection() -> void:
 		if build_id.is_empty():
 			_cancel_rotate_selection(false)
 			return
-		world_manager.call("on_pick_existing_building", build_id, _build_rotating_target.global_position, _build_rotating_target.name, bool(_build_rotating_target.get_meta("player_placed", false)))
+		world_manager.call(
+			"on_pick_existing_building",
+			build_id,
+			_build_rotating_target.global_position,
+			_build_rotating_target.name,
+			bool(_build_rotating_target.get_meta("player_placed", false)),
+			str(_build_rotating_target.get_meta("entity_id", ""))
+		)
 		world_manager.call("add_player_building", build_id, _build_rotating_target.global_position, _build_rotating_target.rotation.y, _build_rotating_target.name, int(_build_rotating_target.get_meta("variant_seed", 0)))
 	_cancel_rotate_selection(false)
 
@@ -1527,6 +1566,189 @@ func _try_pick_existing_building_to_preview() -> bool:
 	return false
 
 
+func _try_pick_villager() -> bool:
+	if not camera:
+		print("[VILLAGER] _try_pick_villager failed: no camera")
+		return false
+	
+	var viewport := get_viewport()
+	var mouse_pos := viewport.get_mouse_position()
+	var origin := camera.project_ray_origin(mouse_pos)
+	var direction := camera.project_ray_normal(mouse_pos)
+	
+	var ray := PhysicsRayQueryParameters3D.create(origin, origin + direction * 500.0)
+	ray.collide_with_areas = false
+	ray.collide_with_bodies = true
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	
+	if hit.is_empty():
+		print("[VILLAGER] _try_pick_villager: ray hit nothing at mouse=", mouse_pos)
+		return false
+	
+	var collider = hit.get("collider")
+	if collider == null:
+		print("[VILLAGER] _try_pick_villager: collider is null")
+		return false
+	
+	var villager_root: Node3D = _find_villager_root_from_collider(collider)
+	if villager_root == null:
+		print("[VILLAGER] _try_pick_villager: no villager root found from collider")
+		return false
+	
+	print("[VILLAGER] _try_pick_villager SUCCESS: picked villager=", villager_root.name)
+	_holding_villager_original_pos = villager_root.global_position
+
+	if villager_root.has_method("_on_pickup"):
+		villager_root.call("_on_pickup")
+	_set_villager_hold_active(villager_root, false)
+	
+	_holding_villager = villager_root
+	_create_villager_preview()
+	# 村民直接拾取，不显示任务绑定UI
+	# 放置后会自动在道路网络上查找路径
+	
+	return true
+
+
+func _find_villager_root_from_collider(collider: Variant) -> Node3D:
+	if collider is Node:
+		var node := collider as Node
+		if node.script and "Villager" in node.script.get_path():
+			return node as Node3D
+		if node.name.begins_with("Villager"):
+			return node as Node3D
+		var parent := node.get_parent()
+		if parent != null and parent.name.begins_with("Villager"):
+			return parent as Node3D
+		for child in node.get_children():
+			if child.name.begins_with("Villager"):
+				return child as Node3D
+	return null
+
+
+func _set_villager_hold_active(villager: Node3D, active: bool) -> void:
+	if villager == null:
+		return
+	villager.set_physics_process(active)
+	villager.set_process(active)
+
+
+func _create_villager_preview() -> void:
+	_clear_villager_preview()
+	
+	_villager_preview = Node3D.new()
+	_villager_preview.name = "VillagerPreview"
+	var world_root := get_node_or_null("/root/World")
+	if world_root:
+		world_root.add_child(_villager_preview)
+	else:
+		get_tree().current_scene.add_child(_villager_preview)
+	
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.name = "Mesh"
+	var capsule := CapsuleMesh.new()
+	capsule.radius = 0.3
+	capsule.height = 1.5
+	mesh_inst.mesh = capsule
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.2, 0.6, 0.9, 0.7)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh_inst.material_override = mat
+	_villager_preview.add_child(mesh_inst)
+	
+	var collision := CollisionShape3D.new()
+	collision.name = "Collision"
+	var shape := CapsuleShape3D.new()
+	shape.radius = 0.3
+	shape.height = 1.5
+	collision.shape = shape
+	_villager_preview.add_child(collision)
+
+
+func _clear_villager_preview() -> void:
+	if _villager_preview:
+		_villager_preview.queue_free()
+		_villager_preview = null
+
+
+func _update_villager_preview() -> void:
+	if _villager_preview == null or _holding_villager == null:
+		return
+	
+	var ground_pos := _mouse_ground_position()
+	if ground_pos != Vector3.ZERO:
+		_holding_villager.global_position = ground_pos
+		_villager_preview.global_position = ground_pos
+
+
+func _show_villager_task_ui() -> void:
+	print("[VILLAGER] _show_villager_task_ui called, _villager_task_ui=", _villager_task_ui, " _holding_villager=", _holding_villager)
+	if _villager_task_ui == null or _holding_villager == null:
+		print("[VILLAGER] _show_villager_task_ui: early return because null")
+		return
+	
+	var callback := Callable(self, "_on_villager_task_bound")
+	print("[VILLAGER] calling open_for_villager")
+	_villager_task_ui.open_for_villager(_holding_villager, callback)
+
+
+func _on_villager_task_bound(start_id: String, end_id: String) -> void:
+	if _holding_villager == null:
+		return
+	
+	if _holding_villager.has_method("set_task"):
+		_holding_villager.call("set_task", start_id, end_id)
+	
+	var villager_system: Node = null
+	if get_tree() != null:
+		villager_system = get_tree().get_first_node_in_group("villager_system")
+	if villager_system and villager_system.has_method("bind_task"):
+		villager_system.call("bind_task", _holding_villager, start_id, end_id)
+
+
+func _place_held_villager() -> void:
+	if _holding_villager == null:
+		_cancel_holding_villager()
+		return
+	
+	var ground_pos := _mouse_ground_position()
+	if ground_pos == Vector3.ZERO:
+		_cancel_holding_villager()
+		return
+	
+	ground_pos.y = 0.0
+	_holding_villager.global_position = ground_pos
+	
+	if _holding_villager.has_method("_on_placed"):
+		_holding_villager.call("_on_placed")
+	_set_villager_hold_active(_holding_villager, true)
+	
+	var villager_system: Node = null
+	if get_tree() != null:
+		villager_system = get_tree().get_first_node_in_group("villager_system")
+	if villager_system and villager_system.has_method("register_villager"):
+		villager_system.call("register_villager", _holding_villager)
+	
+	_holding_villager = null
+	_holding_villager_original_pos = Vector3.ZERO
+	_clear_villager_preview()
+
+
+func _cancel_holding_villager() -> void:
+	if _holding_villager != null:
+		_holding_villager.global_position = _holding_villager_original_pos
+		_holding_villager_original_pos = Vector3.ZERO
+		_set_villager_hold_active(_holding_villager, true)
+		if _holding_villager.has_method("_on_placed"):
+			_holding_villager.call("_on_placed")
+		_holding_villager = null
+	
+	_clear_villager_preview()
+	
+	if _villager_task_ui and _villager_task_ui.visible:
+		_villager_task_ui.visible = false
+
+
 func _mouse_ground_position() -> Vector3:
 	var viewport := get_viewport()
 	var mouse_pos := viewport.get_mouse_position()
@@ -1889,6 +2111,18 @@ func _complete_destruction() -> void:
 		_destroy_ui_bar.value = 1.0
 		_destroy_ui_label.text = "正在破坏 %s  100%%" % _destruct_type_to_name(current_target.destruct_type)
 		_destroy_ui_hold_timer = DESTROY_UI_COMPLETE_HOLD
+
+	var destroyed_node: Node = current_target
+	if destroyed_node.name == "DestructibleArea" and destroyed_node.get_parent() != null:
+		destroyed_node = destroyed_node.get_parent()
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_method("report_destroyed_resource"):
+		world_manager.call(
+			"report_destroyed_resource",
+			current_target.destruct_type,
+			destroyed_node.global_position,
+			str(destroyed_node.get_meta("entity_id", ""))
+		)
 	
 	current_target.complete_destruction()
 	current_target = null

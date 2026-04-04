@@ -27,6 +27,9 @@ func populate_chunk(parent: Node3D, chunk_coord: Vector2i, chunk_size: int, biom
 
 		resource.position = Vector3(local_x, 0.0, local_z)
 		resource.rotate_y(rng.randf_range(0.0, TAU))
+		var world_pos := parent.global_position + resource.position
+		resource.set_meta("destruct_type", _destruct_type_for_resource(resource_type))
+		resource.set_meta("entity_id", _resource_entity_id(chunk_coord, resource_type, world_pos))
 		parent.add_child(resource)
 
 
@@ -222,6 +225,29 @@ func _chunk_seed(chunk_coord: Vector2i) -> int:
 	var x := int(chunk_coord.x) * 73856093
 	var z := int(chunk_coord.y) * 19349663
 	return int(base_seed) + x ^ z
+
+
+func _destruct_type_for_resource(resource_type: StringName) -> String:
+	match resource_type:
+		&"tree":
+			return "tree"
+		&"rock":
+			return "stone"
+		&"grass":
+			return "grass"
+		_:
+			return ""
+
+
+func _resource_entity_id(chunk_coord: Vector2i, resource_type: StringName, world_pos: Vector3) -> String:
+	return "%d|%d|%d|%s|%.3f|%.3f" % [
+		base_seed,
+		chunk_coord.x,
+		chunk_coord.y,
+		String(resource_type),
+		world_pos.x,
+		world_pos.z,
+	]
 
 
 func _material(color: Color) -> StandardMaterial3D:

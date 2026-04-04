@@ -97,6 +97,8 @@ func try_spawn_village(parent: Node3D, chunk_coord: Vector2i, chunk_size: int, b
 	var village := _create_scale_village(rng, scale)
 	village.position = village_local_origin
 	parent.add_child(village)
+	_assign_entity_ids(village, chunk_coord)
+	_register_village_roads(village)
 	placed_villages.append(village_world_origin)
 
 
@@ -114,6 +116,8 @@ func _spawn_starter_village(parent: Node3D, chunk_coord: Vector2i) -> void:
 	starter_village.name = "StarterVillage"
 	starter_village.position = starter_local_origin
 	parent.add_child(starter_village)
+	_assign_entity_ids(starter_village, chunk_coord)
+	_register_village_roads(starter_village)
 
 	placed_villages.append(starter_world_origin)
 	starter_village_spawned = true
@@ -381,6 +385,41 @@ func _tag_building_identity(building: Node3D, building_type: BuildingType, type_
 	building.name = "%s_%02d" % [type_name, count]
 	building.set_meta("build_id", type_id)
 	building.set_meta("build_type_name", type_name)
+	building.set_meta("destruct_type", _destruct_type_for_building_id(type_id))
+
+
+func _destruct_type_for_building_id(build_id: String) -> String:
+	match build_id:
+		"road":
+			return "road"
+		"house", "workshop", "warehouse", "market", "well", "farm", "tower", "barrack", "campfire", "fencepost":
+			return "building"
+		_:
+			return ""
+
+
+func _assign_entity_ids(root: Node3D, chunk_coord: Vector2i) -> void:
+	var queue: Array[Node] = [root]
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var n3d := node as Node3D
+			var build_id := str(n3d.get_meta("build_id", ""))
+			var destruct_type := str(n3d.get_meta("destruct_type", ""))
+			if not build_id.is_empty() or not destruct_type.is_empty():
+				var key_type := build_id
+				if key_type.is_empty():
+					key_type = destruct_type
+				var id_val := "%d|%d|%d|%s|%s" % [
+					base_seed,
+					chunk_coord.x,
+					chunk_coord.y,
+					key_type,
+					n3d.name,
+				]
+				n3d.set_meta("entity_id", id_val)
+		for child in node.get_children():
+			queue.append(child)
 
 
 func _create_house_variant(rng: RandomNumberGenerator) -> Node3D:
@@ -746,6 +785,32 @@ func _add_road_cell(village: Node3D, cell: Vector2i, road_cells: Dictionary, typ
 	road.position = _cell_to_v3(cell)
 	village.add_child(road)
 	road_cells[cell] = true
+	
+	var road_network: Node = null
+	if village.get_tree() != null:
+		road_network = village.get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_method("add_road"):
+		var world_pos := village.global_position + _cell_to_v3(cell)
+		var world_cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		road_network.call("add_road", world_cell)
+
+
+func _register_village_roads(village: Node3D) -> void:
+	if village == null or village.get_tree() == null:
+		return
+	var road_network := village.get_tree().get_first_node_in_group("road_network")
+	if road_network == null or not road_network.has_method("add_road"):
+		return
+	var stack: Array[Node] = [village]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is Node3D:
+			var node3d := node as Node3D
+			if bool(node3d.get_meta("road", false)) or str(node3d.get_meta("build_id", "")) == "road":
+				var cell := Vector2i(roundi(node3d.global_position.x), roundi(node3d.global_position.z))
+				road_network.call("add_road", cell)
+		for child in node.get_children():
+			stack.append(child)
 
 
 func _add_road_line(village: Node3D, from_cell: Vector2i, to_cell: Vector2i, road_cells: Dictionary, type_counts: Dictionary) -> void:
@@ -786,6 +851,10 @@ func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_coun
 	for i in range(villager_count):
 		var villager := CharacterBody3D.new()
 		villager.name = "Villager_%02d" % [i + 1]
+		villager.set_meta("entity_id", "%d|villager|%s|%02d" % [base_seed, village.name, i + 1])
+		villager.collision_layer = 1
+		villager.collision_mask = 1
+		
 		var body := MeshInstance3D.new()
 		var body_mesh := CapsuleMesh.new()
 		body_mesh.radius = 0.32
@@ -794,6 +863,15 @@ func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_coun
 		body.position = Vector3(0.0, 0.95, 0.0)
 		body.material_override = _material(Color(0.82, 0.74, 0.62).lerp(Color(0.45, 0.62, 0.78), rng.randf()))
 		villager.add_child(body)
+
+		var collision := CollisionShape3D.new()
+		collision.name = "Collision"
+		var shape := CapsuleShape3D.new()
+		shape.radius = 0.32
+		shape.height = 1.15
+		collision.shape = shape
+		collision.position = Vector3(0.0, 0.95, 0.0)
+		villager.add_child(collision)
 
 		var mark := Label3D.new()
 		mark.name = "RoadHint"
@@ -818,6 +896,11 @@ func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_coun
 		villager.set("road_cells", road_keys)
 		villager.set("building_targets", layout_positions)
 		village.add_child(villager)
+		
+		if village.get_tree() != null:
+			var villager_system = village.get_tree().get_first_node_in_group("villager_system")
+			if villager_system and villager_system.has_method("register_villager"):
+				villager_system.call("register_villager", villager)
 
 
 func _create_well() -> Node3D:
