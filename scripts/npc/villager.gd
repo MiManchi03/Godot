@@ -22,6 +22,7 @@ enum TaskState {
 @export var carrying_item: bool = false
 
 var _question_timer: float = 0.0
+var _task_replan_timer: float = 0.0
 var _task_state: TaskState = TaskState.UNBOUND
 var _current_path: Array[Vector2i] = []
 var _path_index: int = 0
@@ -219,6 +220,10 @@ func _follow_wander_path(delta: float) -> void:
 
 
 func _try_start_task(delta: float, road_network: Node) -> void:
+	_task_replan_timer -= delta
+	if _task_replan_timer > 0.0:
+		return
+	_task_replan_timer = 0.35
 	if not road_network or not road_network.has_method("is_in_network"):
 		_question_timer = QUESTION_SHOW_TIME
 		return
@@ -319,6 +324,7 @@ func _regenerate_path_to_end() -> void:
 	if path_result is Array:
 		_current_path = path_result
 		_path_index = 0
+		_task_replan_timer = 0.0
 
 
 func _regenerate_path_to_start() -> void:
@@ -347,6 +353,7 @@ func _regenerate_path_to_start() -> void:
 	if path_result is Array:
 		_current_path = path_result
 		_path_index = 0
+		_task_replan_timer = 0.0
 
 
 func _find_nearest_road_cell(world_pos: Vector3, road_network: Node, max_radius: int) -> Dictionary:
@@ -408,6 +415,7 @@ func _on_pickup() -> void:
 		_task_state = TaskState.WAITING
 	else:
 		_task_state = TaskState.UNBOUND
+	_task_replan_timer = 0.0
 	_current_path.clear()
 	_path_index = 0
 	carrying_item = false
@@ -434,7 +442,7 @@ func _on_placed() -> void:
 	if get_tree() != null:
 		world_manager = get_tree().get_first_node_in_group("world_manager")
 	if world_manager and world_manager.has_method("save_villager_state"):
-		world_manager.call("save_villager_state", self)
+		world_manager.call("save_villager_state", self, false)
 
 
 func on_loaded_from_save() -> void:

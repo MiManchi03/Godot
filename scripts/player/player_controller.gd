@@ -1733,7 +1733,7 @@ func _place_held_villager() -> void:
 	_build_mode_has_changes = true
 	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager and world_manager.has_method("save_villager_state"):
-		world_manager.call("save_villager_state", _holding_villager)
+		world_manager.call("save_villager_state", _holding_villager, false)
 	
 	var villager_system: Node = null
 	if get_tree() != null:
@@ -1755,7 +1755,7 @@ func _cancel_holding_villager() -> void:
 			_holding_villager.call("_on_placed")
 		var world_manager := get_node_or_null("/root/World/WorldManager")
 		if world_manager and world_manager.has_method("save_villager_state"):
-			world_manager.call("save_villager_state", _holding_villager)
+			world_manager.call("save_villager_state", _holding_villager, false)
 		_holding_villager = null
 	
 	_clear_villager_preview()

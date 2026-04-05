@@ -3,7 +3,10 @@ extends Node3D
 const CHUNK_SIZE := 32
 const LOAD_RADIUS := 5
 const UNLOAD_RADIUS := 7
+const CHUNK_CREATES_PER_FRAME := 2
 const VILLAGER_SNAPSHOT_INTERVAL := 5.0
+const VILLAGER_SAVE_POS_EPS := 0.2
+const VILLAGER_SAVE_ROT_EPS := 0.08
 
 @export var world_seed: int = 91357
 
@@ -15,6 +18,11 @@ var world_state: WorldState
 var player: CharacterBody3D
 var loaded_chunks: Dictionary = {}
 var _villager_snapshot_timer: float = 0.0
+var _villager_save_cache: Dictionary = {}
+var _building_position_cache: Dictionary = {}
+var _building_cache_dirty: bool = true
+var _pending_chunk_coords: Array[Vector2i] = []
+var _pending_chunk_set: Dictionary = {}
 
 
 func _ready() -> void:
@@ -35,6 +43,7 @@ func _ready() -> void:
 		return
 
 	_load_saved_player_position()
+	_building_cache_dirty = true
 
 	_update_chunks_around_player()
 
@@ -42,29 +51,33 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	if player == null:
 		return
-	_villager_snapshot_timer += maxf(_delta, 0.0)
-	if _villager_snapshot_timer >= VILLAGER_SNAPSHOT_INTERVAL:
-		_snapshot_loaded_villagers()
-		_villager_snapshot_timer = 0.0
+	if _is_build_mode_active():
+		_villager_snapshot_timer += maxf(_delta, 0.0)
+		if _villager_snapshot_timer >= VILLAGER_SNAPSHOT_INTERVAL:
+			_snapshot_loaded_villagers(false)
+			_villager_snapshot_timer = 0.0
 	if world_state != null:
 		world_state.tick(_delta)
 	_update_chunks_around_player()
 
 
 func _exit_tree() -> void:
-	_snapshot_loaded_villagers()
+	_snapshot_loaded_villagers(true)
 	if world_state != null:
 		world_state.save_dirty(true)
 
 
 func _update_chunks_around_player() -> void:
 	var player_chunk := _world_to_chunk(player.global_position)
+	var desired: Dictionary = {}
 
 	for x in range(player_chunk.x - LOAD_RADIUS, player_chunk.x + LOAD_RADIUS + 1):
 		for z in range(player_chunk.y - LOAD_RADIUS, player_chunk.y + LOAD_RADIUS + 1):
 			var coord := Vector2i(x, z)
-			if not loaded_chunks.has(coord):
-				_create_chunk(coord)
+			desired[coord] = true
+			if not loaded_chunks.has(coord) and not _pending_chunk_set.has(coord):
+				_pending_chunk_coords.append(coord)
+				_pending_chunk_set[coord] = true
 
 	var to_remove: Array[Vector2i] = []
 	for coord in loaded_chunks.keys():
@@ -76,6 +89,35 @@ func _update_chunks_around_player() -> void:
 
 	for coord in to_remove:
 		_remove_chunk(coord)
+
+	if not _pending_chunk_coords.is_empty():
+		var kept: Array[Vector2i] = []
+		_pending_chunk_set.clear()
+		for coord in _pending_chunk_coords:
+			if desired.has(coord):
+				kept.append(coord)
+				_pending_chunk_set[coord] = true
+		_pending_chunk_coords = kept
+
+	_process_chunk_create_queue(player_chunk)
+
+
+func _process_chunk_create_queue(player_chunk: Vector2i) -> void:
+	if _pending_chunk_coords.is_empty():
+		return
+	_pending_chunk_coords.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		var da := absi(a.x - player_chunk.x) + absi(a.y - player_chunk.y)
+		var db := absi(b.x - player_chunk.x) + absi(b.y - player_chunk.y)
+		return da < db
+	)
+	var budget := CHUNK_CREATES_PER_FRAME
+	while budget > 0 and not _pending_chunk_coords.is_empty():
+		var coord: Vector2i = _pending_chunk_coords.pop_front() as Vector2i
+		_pending_chunk_set.erase(coord)
+		if loaded_chunks.has(coord):
+			continue
+		_create_chunk(coord)
+		budget -= 1
 
 
 func _create_chunk(coord: Vector2i) -> void:
@@ -92,20 +134,22 @@ func _create_chunk(coord: Vector2i) -> void:
 	resource_spawner.populate_chunk(chunk_root, coord, CHUNK_SIZE, biome)
 	village_generator.try_spawn_village(chunk_root, coord, CHUNK_SIZE, biome)
 	loaded_chunks[coord] = chunk_root
+	_building_cache_dirty = true
 	_apply_player_buildings_for_chunk(coord, chunk_root)
-	_reapply_removed_originals_to_chunk(chunk_root)
 
 
 func _remove_chunk(coord: Vector2i) -> void:
 	if not loaded_chunks.has(coord):
 		return
-	_snapshot_loaded_villagers()
-	if world_state != null:
-		world_state.save_dirty(true)
-
 	var chunk: Node3D = loaded_chunks[coord]
+	_snapshot_chunk_villagers(chunk, false)
+	if world_state != null:
+		world_state.save_dirty(false)
+
 	loaded_chunks.erase(coord)
 	chunk.queue_free()
+	_building_cache_dirty = true
+	_pending_chunk_set.erase(coord)
 
 
 func _build_ground_mesh(biome: BiomeGenerator.Biome) -> StaticBody3D:
@@ -148,6 +192,12 @@ func _world_to_chunk(pos: Vector3) -> Vector2i:
 	)
 
 
+func _is_build_mode_active() -> bool:
+	if player == null:
+		return false
+	return player.get("_build_mode_active") == true
+
+
 func add_player_building(build_id: String, world_pos: Vector3, rotation_y: float, node_name: String = "", variant_seed: int = 0) -> void:
 	if world_state == null:
 		return
@@ -184,6 +234,7 @@ func spawn_player_building(build_id: String, world_pos: Vector3, rotation_y: flo
 		add_child(instance)
 	instance.global_position = world_pos
 	instance.rotation.y = rotation_y
+	_building_cache_dirty = true
 	_update_road_network_on_building_added(build_id, world_pos)
 	return instance
 
@@ -193,14 +244,16 @@ func on_pick_existing_building(build_id: String, world_pos: Vector3, node_name: 
 		return
 	if was_player_placed:
 		world_state.remove_added_player(build_id, world_pos, node_name)
+		_building_cache_dirty = true
 		_update_road_network_on_building_removed(build_id, world_pos)
 		return
 	world_state.add_removed_original(build_id, world_pos, node_name, entity_id)
+	_building_cache_dirty = true
 	_update_road_network_on_building_removed(build_id, world_pos)
 
 
 func save_player_buildings() -> void:
-	_snapshot_loaded_villagers()
+	_snapshot_loaded_villagers(true)
 	if world_state == null:
 		return
 	world_state.save_dirty(true)
@@ -208,7 +261,7 @@ func save_player_buildings() -> void:
 
 func save_build_mode_changes() -> void:
 	print("[SAVE] 保存建筑模式改动...")
-	_snapshot_loaded_villagers()
+	_snapshot_loaded_villagers(true)
 	if world_state == null:
 		return
 	world_state.save_dirty(true)
@@ -218,7 +271,7 @@ func save_build_mode_changes() -> void:
 func save_all_player_changes() -> void:
 	print("[SAVE] 保存所有玩家改动...")
 	# 保存村民状态
-	_snapshot_loaded_villagers()
+	_snapshot_loaded_villagers(true)
 	# 保存玩家位置
 	_save_player_position()
 	if world_state == null:
@@ -256,20 +309,49 @@ func _load_saved_player_position() -> void:
 	print("[LOAD] 玩家位置已恢复: ", new_pos, " 旋转: ", rot)
 
 
-func _snapshot_loaded_villagers() -> void:
+func _snapshot_loaded_villagers(force_save: bool = false) -> void:
 	for chunk_root_variant in loaded_chunks.values():
 		var chunk_root := chunk_root_variant as Node3D
-		if chunk_root == null:
-			continue
-		var queue: Array[Node] = [chunk_root]
-		while not queue.is_empty():
-			var node := queue.pop_front() as Node
-			if node is Node3D:
-				var node3d := node as Node3D
-				if node3d.name.begins_with("Villager") and not str(node3d.get_meta("entity_id", "")).is_empty():
-					save_villager_state(node3d)
-			for child in node.get_children():
-				queue.append(child)
+		_snapshot_chunk_villagers(chunk_root, force_save)
+
+
+func _snapshot_chunk_villagers(chunk_root: Node3D, force_save: bool = false) -> void:
+	if chunk_root == null:
+		return
+	var queue: Array[Node] = [chunk_root]
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var node3d := node as Node3D
+			if node3d.name.begins_with("Villager") and not str(node3d.get_meta("entity_id", "")).is_empty():
+				if force_save or _villager_needs_save(node3d):
+					save_villager_state(node3d, force_save)
+		for child in node.get_children():
+			queue.append(child)
+
+
+func _villager_needs_save(villager: Node3D) -> bool:
+	var entity_id := str(villager.get_meta("entity_id", ""))
+	if entity_id.is_empty():
+		return false
+	var pos := villager.global_position
+	if pos == Vector3.ZERO:
+		return false
+	var rot := villager.rotation.y
+	var rec = _villager_save_cache.get(entity_id, null)
+	if not (rec is Dictionary):
+		return true
+	var prev := rec as Dictionary
+	var prev_pos_val = prev.get("position", null)
+	if not (prev_pos_val is Vector3):
+		return true
+	var prev_pos := prev_pos_val as Vector3
+	var prev_rot := float(prev.get("rotation", 0.0))
+	if prev_pos.distance_to(pos) > VILLAGER_SAVE_POS_EPS:
+		return true
+	if absf(prev_rot - rot) > VILLAGER_SAVE_ROT_EPS:
+		return true
+	return false
 
 
 func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> void:
@@ -303,31 +385,7 @@ func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> v
 	if not villagers.is_empty():
 		_apply_saved_villagers(chunk_root, villagers)
 
-	_reapply_destroyed_to_chunk(chunk_root)
 
-
-func _reapply_removed_originals_to_chunk(chunk_root: Node3D) -> void:
-	if world_state == null:
-		return
-	for loaded_coord_variant in loaded_chunks.keys():
-		var loaded_coord := loaded_coord_variant as Vector2i
-		var chunk_data := world_state.get_chunk_data(loaded_coord)
-		var removed := chunk_data.get("removed", []) as Array
-		if removed.is_empty():
-			continue
-		_apply_removed_originals(chunk_root, removed)
-
-
-func _reapply_destroyed_to_chunk(chunk_root: Node3D) -> void:
-	if world_state == null:
-		return
-	for loaded_coord_variant in loaded_chunks.keys():
-		var loaded_coord := loaded_coord_variant as Vector2i
-		var chunk_data := world_state.get_chunk_data(loaded_coord)
-		var destroyed := chunk_data.get("destroyed", []) as Array
-		if destroyed.is_empty():
-			continue
-		_apply_destroyed_resources(chunk_root, destroyed)
 
 
 func report_destroyed_resource(destruct_type: String, world_pos: Vector3, entity_id: String = "") -> void:
@@ -336,7 +394,7 @@ func report_destroyed_resource(destruct_type: String, world_pos: Vector3, entity
 	world_state.add_destroyed_resource(destruct_type, world_pos, entity_id)
 
 
-func save_villager_state(villager: Node3D) -> void:
+func save_villager_state(villager: Node3D, flush_to_disk: bool = false) -> void:
 	if world_state == null or villager == null:
 		return
 	var save_pos := villager.global_position
@@ -370,10 +428,15 @@ func save_villager_state(villager: Node3D) -> void:
 	var task_state := 0
 	if villager.has_method("get_task_state"):
 		task_state = int(villager.call("get_task_state"))
+	_villager_save_cache[entity_id] = {
+		"position": save_pos,
+		"rotation": villager.rotation.y,
+	}
 	
-	# Save with origin chunk and force save to disk
+	# Save in memory first; flush only on explicit save points
 	world_state.upsert_villager_state(entity_id, save_pos, villager.rotation.y, task_start_id, task_end_id, carrying_item, task_state, origin_chunk)
-	world_state.save_dirty(true)
+	if flush_to_disk:
+		world_state.save_dirty(true)
 
 
 func _apply_saved_villagers(chunk_root: Node3D, villagers: Array) -> void:
@@ -745,36 +808,34 @@ func _stable_variant_seed(entry: Dictionary) -> int:
 func find_building_by_id(build_id: String) -> Vector3:
 	if build_id.is_empty():
 		return Vector3.ZERO
-	
-	var target_type := _building_type_from_id(build_id)
-	if target_type == -1:
-		return Vector3.ZERO
-	
-	for chunk_root in loaded_chunks.values():
-		if chunk_root == null:
-			continue
-		var buildings := _find_buildings_of_type(chunk_root, target_type)
-		if not buildings.is_empty():
-			return buildings[0].global_position
-	
+	if _building_cache_dirty:
+		_rebuild_building_position_cache()
+		_building_cache_dirty = false
+	if _building_position_cache.has(build_id):
+		var cached = _building_position_cache[build_id]
+		if cached is Vector3:
+			return cached as Vector3
 	return Vector3.ZERO
 
 
-func _find_buildings_of_type(root: Node, building_type: int) -> Array[Node3D]:
-	var result: Array[Node3D] = []
-	var queue: Array[Node] = [root]
-	
-	while not queue.is_empty():
-		var node: Node = queue.pop_front()
-		if node is Node3D and node.has_meta("building_type"):
-			var bt: int = int(node.get_meta("building_type", -1))
-			if bt == building_type:
-				result.append(node as Node3D)
-		
-		for child in node.get_children():
-			queue.append(child)
-	
-	return result
+func _rebuild_building_position_cache() -> void:
+	_building_position_cache.clear()
+	for chunk_root in loaded_chunks.values():
+		if chunk_root == null:
+			continue
+		var queue: Array[Node] = [chunk_root]
+		while not queue.is_empty():
+			var node: Node = queue.pop_front()
+			if node is Node3D:
+				var build_id := _resolve_build_id(node as Node3D)
+				if not build_id.is_empty() and not _building_position_cache.has(build_id):
+					_building_position_cache[build_id] = (node as Node3D).global_position
+			for child in node.get_children():
+				queue.append(child)
+
+
+func notify_building_cache_dirty() -> void:
+	_building_cache_dirty = true
 
 
 func _update_road_network_on_building_added(build_id: String, world_pos: Vector3) -> void:
