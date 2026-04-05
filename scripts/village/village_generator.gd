@@ -404,6 +404,19 @@ func _assign_entity_ids(root: Node3D, chunk_coord: Vector2i) -> void:
 		var node := queue.pop_front() as Node
 		if node is Node3D:
 			var n3d := node as Node3D
+			if n3d.name.begins_with("Villager"):
+				# Use chunk-aware ID to avoid collisions across villages
+				var villager_id := "%d|%d|%d|villager|%s" % [
+					base_seed,
+					chunk_coord.x,
+					chunk_coord.y,
+					n3d.name,
+				]
+				n3d.set_meta("entity_id", villager_id)
+				n3d.set_meta("origin_chunk", chunk_coord)
+				for child in node.get_children():
+					queue.append(child)
+				continue
 			var build_id := str(n3d.get_meta("build_id", ""))
 			var destruct_type := str(n3d.get_meta("destruct_type", ""))
 			if not build_id.is_empty() or not destruct_type.is_empty():
@@ -851,7 +864,6 @@ func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_coun
 	for i in range(villager_count):
 		var villager := CharacterBody3D.new()
 		villager.name = "Villager_%02d" % [i + 1]
-		villager.set_meta("entity_id", "%d|villager|%s|%02d" % [base_seed, village.name, i + 1])
 		villager.collision_layer = 1
 		villager.collision_mask = 1
 		

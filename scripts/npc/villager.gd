@@ -430,6 +430,22 @@ func _on_placed() -> void:
 	else:
 		_task_state = TaskState.UNBOUND
 
+	var world_manager: Node = null
+	if get_tree() != null:
+		world_manager = get_tree().get_first_node_in_group("world_manager")
+	if world_manager and world_manager.has_method("save_villager_state"):
+		world_manager.call("save_villager_state", self)
+
+
+func on_loaded_from_save() -> void:
+	_last_cell = _current_cell()
+	_current_path.clear()
+	_path_index = 0
+	if has_task():
+		_task_state = TaskState.WAITING
+	else:
+		_task_state = TaskState.UNBOUND
+
 
 func _try_auto_bind_task() -> void:
 	# Auto-bind: workshop -> warehouse
@@ -449,3 +465,18 @@ func _try_auto_bind_task() -> void:
 		_task_state = TaskState.WAITING
 		carrying_item = false
 		print("[VILLAGER] Auto-bound task: workshop -> warehouse")
+
+
+func apply_saved_state(task_start_id: String, task_end_id: String, saved_carrying_item: bool, saved_task_state: int) -> void:
+	task_start_build_id = task_start_id
+	task_end_build_id = task_end_id
+	carrying_item = saved_carrying_item
+	_task_state = TaskState.UNBOUND
+	if saved_task_state >= int(TaskState.UNBOUND) and saved_task_state <= int(TaskState.RETURNING):
+		_task_state = saved_task_state
+	if task_start_build_id.is_empty() or task_end_build_id.is_empty():
+		if _task_state != TaskState.UNBOUND:
+			_task_state = TaskState.UNBOUND
+	_current_path.clear()
+	_path_index = 0
+	_work_timer = 0.0

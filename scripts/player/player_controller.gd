@@ -86,6 +86,7 @@ var _destroy_ui_hold_timer: float = 0.0
 var _destroy_ui_fast_mode: bool = false
 var _destroy_ui_target_type: String = ""
 var _build_mode: bool = false
+var _build_mode_has_changes: bool = false
 var _build_transition_tween: Tween
 var _build_camera_height: float = BUILD_CAMERA_HEIGHT_DEFAULT
 var _build_camera_zoom: float = 32.0
@@ -693,6 +694,12 @@ func _enter_build_mode() -> void:
 
 
 func _exit_build_mode() -> void:
+	# 保存建筑模式期间的改动
+	if _build_mode_has_changes:
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager and world_manager.has_method("save_build_mode_changes"):
+			world_manager.call("save_build_mode_changes")
+	_build_mode_has_changes = false
 	_build_mode = false
 	visible = true
 	_build_drag_map = false
@@ -918,6 +925,7 @@ func _finalize_picked_original() -> void:
 			_build_picked_original_was_player_placed,
 			_build_picked_original_entity_id
 		)
+	_build_mode_has_changes = true
 	_build_picked_original.queue_free()
 	_clear_picked_original()
 
@@ -1722,6 +1730,10 @@ func _place_held_villager() -> void:
 	if _holding_villager.has_method("_on_placed"):
 		_holding_villager.call("_on_placed")
 	_set_villager_hold_active(_holding_villager, true)
+	_build_mode_has_changes = true
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_method("save_villager_state"):
+		world_manager.call("save_villager_state", _holding_villager)
 	
 	var villager_system: Node = null
 	if get_tree() != null:
@@ -1741,6 +1753,9 @@ func _cancel_holding_villager() -> void:
 		_set_villager_hold_active(_holding_villager, true)
 		if _holding_villager.has_method("_on_placed"):
 			_holding_villager.call("_on_placed")
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager and world_manager.has_method("save_villager_state"):
+			world_manager.call("save_villager_state", _holding_villager)
 		_holding_villager = null
 	
 	_clear_villager_preview()

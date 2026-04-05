@@ -123,6 +123,14 @@ func _on_close_button_pressed() -> void:
 	_close_menu()
 
 
+func _on_exit_game_button_pressed() -> void:
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_method("save_all_player_changes"):
+		world_manager.call("save_all_player_changes")
+	get_tree().paused = false
+	get_tree().quit()
+
+
 func _on_right_drag_yaw_slider_value_changed(value: float) -> void:
 	if _is_initializing_controls:
 		return

@@ -3,6 +3,7 @@ extends Node3D
 const CHUNK_SIZE := 32
 const LOAD_RADIUS := 5
 const UNLOAD_RADIUS := 7
+const VILLAGER_SNAPSHOT_INTERVAL := 5.0
 
 @export var world_seed: int = 91357
 
@@ -13,6 +14,7 @@ var world_state: WorldState
 
 var player: CharacterBody3D
 var loaded_chunks: Dictionary = {}
+var _villager_snapshot_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -32,18 +34,25 @@ func _ready() -> void:
 		push_error("WorldManager requires a sibling node named 'Player'.")
 		return
 
+	_load_saved_player_position()
+
 	_update_chunks_around_player()
 
 
 func _process(_delta: float) -> void:
 	if player == null:
 		return
+	_villager_snapshot_timer += maxf(_delta, 0.0)
+	if _villager_snapshot_timer >= VILLAGER_SNAPSHOT_INTERVAL:
+		_snapshot_loaded_villagers()
+		_villager_snapshot_timer = 0.0
 	if world_state != null:
 		world_state.tick(_delta)
 	_update_chunks_around_player()
 
 
 func _exit_tree() -> void:
+	_snapshot_loaded_villagers()
 	if world_state != null:
 		world_state.save_dirty(true)
 
@@ -90,6 +99,7 @@ func _create_chunk(coord: Vector2i) -> void:
 func _remove_chunk(coord: Vector2i) -> void:
 	if not loaded_chunks.has(coord):
 		return
+	_snapshot_loaded_villagers()
 	if world_state != null:
 		world_state.save_dirty(true)
 
@@ -190,9 +200,76 @@ func on_pick_existing_building(build_id: String, world_pos: Vector3, node_name: 
 
 
 func save_player_buildings() -> void:
+	_snapshot_loaded_villagers()
 	if world_state == null:
 		return
 	world_state.save_dirty(true)
+
+
+func save_build_mode_changes() -> void:
+	print("[SAVE] 保存建筑模式改动...")
+	_snapshot_loaded_villagers()
+	if world_state == null:
+		return
+	world_state.save_dirty(true)
+	print("[SAVE] 建筑模式改动已保存")
+
+
+func save_all_player_changes() -> void:
+	print("[SAVE] 保存所有玩家改动...")
+	# 保存村民状态
+	_snapshot_loaded_villagers()
+	# 保存玩家位置
+	_save_player_position()
+	if world_state == null:
+		return
+	world_state.save_dirty(true)
+	print("[SAVE] 所有玩家改动已保存")
+
+
+func _save_player_position() -> void:
+	if player == null:
+		return
+	var player_pos = {
+		"position": [player.global_position.x, player.global_position.y, player.global_position.z],
+		"rotation": player.rotation.y,
+	}
+	if world_state != null:
+		world_state.save_player_position(player_pos)
+
+
+func _load_saved_player_position() -> void:
+	if player == null:
+		return
+	if world_state == null:
+		return
+	var saved_pos = world_state.get_player_position()
+	var pos_arr = saved_pos.get("position", null)
+	if not (pos_arr is Array) or (pos_arr as Array).size() < 3:
+		return
+	var new_pos = Vector3(float(pos_arr[0]), float(pos_arr[1]), float(pos_arr[2]))
+	if new_pos == Vector3.ZERO:
+		return
+	player.global_position = new_pos
+	var rot = saved_pos.get("rotation", 0.0)
+	player.rotation.y = float(rot)
+	print("[LOAD] 玩家位置已恢复: ", new_pos, " 旋转: ", rot)
+
+
+func _snapshot_loaded_villagers() -> void:
+	for chunk_root_variant in loaded_chunks.values():
+		var chunk_root := chunk_root_variant as Node3D
+		if chunk_root == null:
+			continue
+		var queue: Array[Node] = [chunk_root]
+		while not queue.is_empty():
+			var node := queue.pop_front() as Node
+			if node is Node3D:
+				var node3d := node as Node3D
+				if node3d.name.begins_with("Villager") and not str(node3d.get_meta("entity_id", "")).is_empty():
+					save_villager_state(node3d)
+			for child in node.get_children():
+				queue.append(child)
 
 
 func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> void:
@@ -221,6 +298,10 @@ func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> v
 	var destroyed := chunk_data.get("destroyed", []) as Array
 	if not destroyed.is_empty():
 		_apply_destroyed_resources(chunk_root, destroyed)
+
+	var villagers := chunk_data.get("villagers", []) as Array
+	if not villagers.is_empty():
+		_apply_saved_villagers(chunk_root, villagers)
 
 	_reapply_destroyed_to_chunk(chunk_root)
 
@@ -253,6 +334,231 @@ func report_destroyed_resource(destruct_type: String, world_pos: Vector3, entity
 	if world_state == null:
 		return
 	world_state.add_destroyed_resource(destruct_type, world_pos, entity_id)
+
+
+func save_villager_state(villager: Node3D) -> void:
+	if world_state == null or villager == null:
+		return
+	var save_pos := villager.global_position
+	if save_pos == Vector3.ZERO:
+		return
+	var entity_id := str(villager.get_meta("entity_id", ""))
+	var origin_chunk := _origin_chunk_from_meta(villager.get_meta("origin_chunk", null))
+	if origin_chunk == Vector2i(1 << 30, 1 << 30):
+		origin_chunk = _world_to_chunk(save_pos)
+	if entity_id.is_empty():
+		# Use the SAME seed as village_generator.base_seed to ensure consistency
+		entity_id = "%d|%d|%d|villager|%s" % [village_generator.base_seed, origin_chunk.x, origin_chunk.y, villager.name]
+		villager.set_meta("entity_id", entity_id)
+		villager.set_meta("origin_chunk", origin_chunk)
+	if entity_id.is_empty():
+		return
+	
+	# Calculate origin chunk from meta, entity_id, or position fallback
+	origin_chunk = _origin_chunk_from_meta(villager.get_meta("origin_chunk", null))
+	if origin_chunk == Vector2i(1 << 30, 1 << 30):
+		origin_chunk = _chunk_from_entity_id(entity_id)
+	if origin_chunk == Vector2i(1 << 30, 1 << 30):
+		origin_chunk = _world_to_chunk(save_pos)
+	
+	var task_start_val = villager.get("task_start_build_id")
+	var task_end_val = villager.get("task_end_build_id")
+	var carrying_item_val = villager.get("carrying_item")
+	var task_start_id := "" if task_start_val == null else str(task_start_val)
+	var task_end_id := "" if task_end_val == null else str(task_end_val)
+	var carrying_item := false if carrying_item_val == null else bool(carrying_item_val)
+	var task_state := 0
+	if villager.has_method("get_task_state"):
+		task_state = int(villager.call("get_task_state"))
+	
+	# Save with origin chunk and force save to disk
+	world_state.upsert_villager_state(entity_id, save_pos, villager.rotation.y, task_start_id, task_end_id, carrying_item, task_state, origin_chunk)
+	world_state.save_dirty(true)
+
+
+func _apply_saved_villagers(chunk_root: Node3D, villagers: Array) -> void:
+	var applied: Dictionary = {}
+	var matched_count := 0
+	var skipped_no_entity := 0
+	var skipped_no_match := 0
+
+	for v_variant in villagers:
+		var entry := v_variant as Dictionary
+		var entity_id := str(entry.get("entity_id", ""))
+		
+		# Skip if already applied this entity_id
+		if not entity_id.is_empty() and applied.has(entity_id):
+			continue
+		
+		var pos := _entry_position(entry)
+		
+		# Skip if position is missing or invalid
+		var pos_arr = entry.get("position", null)
+		if not (pos_arr is Array) or (pos_arr as Array).size() < 3:
+			skipped_no_entity += 1
+			continue
+		
+		# Multi-level matching:
+		# Level 1: Try exact entity_id match
+		var villager := _find_villager_by_entity_id(chunk_root, entity_id)
+		
+		# Level 2: If no entity_id match, try name match (no position restriction)
+		if villager == null:
+			var villager_name := _villager_name_from_entity_id(entity_id)
+			if not villager_name.is_empty():
+				villager = _find_villager_by_name_simple(chunk_root, villager_name)
+		
+		# If still no match, skip (don't overwrite any villager)
+		if villager == null:
+			skipped_no_match += 1
+			continue
+		
+		# Apply the saved state
+		if pos == Vector3.ZERO:
+			skipped_no_entity += 1
+			continue
+		matched_count += 1
+		if not entity_id.is_empty():
+			applied[entity_id] = true
+
+		villager.global_position = pos
+		villager.rotation.y = float(entry.get("rotation_y", 0.0))
+		
+		var task_start := str(entry.get("task_start_build_id", ""))
+		var task_end := str(entry.get("task_end_build_id", ""))
+		var task_state := int(entry.get("task_state", 0))
+		
+		if villager.has_method("apply_saved_state"):
+			villager.call("apply_saved_state", task_start, task_end, bool(entry.get("carrying_item", false)), task_state)
+		elif villager.has_method("set_task") and (not task_start.is_empty() or not task_end.is_empty()):
+			villager.call("set_task", task_start, task_end)
+		
+		if villager.has_method("set"):
+			villager.set("carrying_item", bool(entry.get("carrying_item", false)))
+		
+		if villager.has_method("on_loaded_from_save"):
+			villager.call("on_loaded_from_save")
+	
+	# Debug output (can be removed in production)
+	if matched_count > 0 or skipped_no_match > 0:
+		print("[VILLAGER] Applied %d villagers, skipped %d (no position), %d (no match)" % [matched_count, skipped_no_entity, skipped_no_match])
+
+
+func _find_villager_by_entity_id(root: Node, entity_id: String) -> Node3D:
+	if entity_id.is_empty():
+		return null
+	var queue: Array[Node] = [root]
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var node3d := node as Node3D
+			if node3d.name.begins_with("Villager") and str(node3d.get_meta("entity_id", "")) == entity_id:
+				return node3d
+		for child in node.get_children():
+			queue.append(child)
+	return null
+
+
+func _find_villager_by_name(root: Node, villager_name: String, required_chunk: Vector2i) -> Node3D:
+	if villager_name.is_empty():
+		return null
+	var queue: Array[Node] = [root]
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var node3d := node as Node3D
+			if node3d.name == villager_name:
+				if required_chunk != Vector2i(1 << 30, 1 << 30):
+					var c := _chunk_from_entity_id(str(node3d.get_meta("entity_id", "")))
+					if c != required_chunk:
+						for child in node.get_children():
+							queue.append(child)
+						continue
+				return node3d
+		for child in node.get_children():
+			queue.append(child)
+	return null
+
+
+func _find_villager_for_saved_entry(root: Node, entity_id: String, legacy_name: String, required_chunk: Vector2i) -> Node3D:
+	var by_id := _find_villager_by_entity_id(root, entity_id)
+	if by_id != null:
+		return by_id
+	return _find_villager_by_name(root, legacy_name, required_chunk)
+
+
+func _find_villager_by_name_approximate(root: Node, villager_name: String, target_pos: Vector3, max_distance: float) -> Node3D:
+	if villager_name.is_empty():
+		return null
+	
+	var best_match: Node3D = null
+	var best_distance_sq := max_distance * max_distance
+	var queue: Array[Node] = [root]
+	
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var node3d := node as Node3D
+			if node3d.name == villager_name:
+				var dist_sq := node3d.global_position.distance_squared_to(target_pos)
+				if dist_sq < best_distance_sq:
+					best_distance_sq = dist_sq
+					best_match = node3d
+		for child in node.get_children():
+			queue.append(child)
+	
+	return best_match
+
+
+func _find_villager_by_name_simple(root: Node, villager_name: String) -> Node3D:
+	if villager_name.is_empty():
+		return null
+	var queue: Array[Node] = [root]
+	while not queue.is_empty():
+		var node := queue.pop_front() as Node
+		if node is Node3D:
+			var node3d := node as Node3D
+			if node3d.name == villager_name:
+				return node3d
+		for child in node.get_children():
+			queue.append(child)
+	return null
+
+
+func _chunk_from_entity_id(entity_id: String) -> Vector2i:
+	var invalid := Vector2i(1 << 30, 1 << 30)
+	if entity_id.is_empty():
+		return invalid
+	var parts := entity_id.split("|")
+	# New format: seed|villager|name (3 parts)
+	if parts.size() == 3 and parts[1] == "villager":
+		return invalid
+	# Old format: seed|cx|cz|villager|...
+	if parts.size() >= 4 and parts[3] == "villager":
+		return Vector2i(int(parts[1]), int(parts[2]))
+	return invalid
+
+
+func _villager_name_from_entity_id(entity_id: String) -> String:
+	if entity_id.is_empty():
+		return ""
+	var parts := entity_id.split("|")
+	if parts.size() >= 3 and parts[1] == "villager":
+		return parts[2]
+	if parts.size() >= 5 and parts[3] == "villager":
+		return parts[4]
+	return ""
+
+
+func _origin_chunk_from_meta(meta_val) -> Vector2i:
+	var invalid := Vector2i(1 << 30, 1 << 30)
+	if meta_val is Vector2i:
+		return meta_val as Vector2i
+	if meta_val is Array:
+		var arr := meta_val as Array
+		if arr.size() >= 2:
+			return Vector2i(int(arr[0]), int(arr[1]))
+	return invalid
 
 
 func _apply_destroyed_resources(chunk_root: Node3D, destroyed: Array) -> void:
@@ -421,7 +727,7 @@ func _building_type_from_id(build_id: String) -> int:
 
 
 func _entry_position(entry: Dictionary) -> Vector3:
-	var arr: Variant = entry.get("position", [])
+	var arr = entry.get("position", [])
 	if not (arr is Array):
 		return Vector3.ZERO
 	var pos_array := arr as Array

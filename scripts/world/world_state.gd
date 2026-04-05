@@ -3,6 +3,7 @@ class_name WorldState
 
 const DATA_VERSION := 2
 const AUTOSAVE_INTERVAL := 3.0
+const INVALID_CHUNK_COORD := Vector2i(1 << 30, 1 << 30)
 
 var world_seed: int
 var chunk_size: int
@@ -13,6 +14,7 @@ var meta_path: String
 var _chunk_cache: Dictionary = {}
 var _dirty_keys: Dictionary = {}
 var _autosave_timer: float = 0.0
+var _player_position_cache: Dictionary = {}
 
 
 func _init(seed: int, chunk_span: int) -> void:
@@ -23,6 +25,7 @@ func _init(seed: int, chunk_span: int) -> void:
 	meta_path = "%s/meta.json" % world_dir
 	_ensure_world_dirs()
 	_write_meta(false)
+	_load_player_position()
 
 
 func tick(delta: float) -> void:
@@ -37,6 +40,7 @@ func get_chunk_data(coord: Vector2i) -> Dictionary:
 		"added": (chunk_data.get("added", []) as Array).duplicate(true),
 		"removed": (chunk_data.get("removed", []) as Array).duplicate(true),
 		"destroyed": (chunk_data.get("destroyed", []) as Array).duplicate(true),
+		"villagers": (chunk_data.get("villagers", []) as Array).duplicate(true),
 	}
 
 
@@ -149,11 +153,59 @@ func add_destroyed_resource(destruct_type: String, world_pos: Vector3, entity_id
 	_mark_chunk_dirty(chunk_data)
 
 
+func upsert_villager_state(entity_id: String, world_pos: Vector3, rotation_y: float, task_start_id: String, task_end_id: String, carrying_item: bool, task_state: int, origin_chunk: Vector2i = INVALID_CHUNK_COORD) -> void:
+	if entity_id.is_empty():
+		return
+	if world_pos == Vector3.ZERO:
+		return
+	
+	# Use origin chunk if provided, otherwise calculate from position
+	var target_chunk := origin_chunk
+	if target_chunk == INVALID_CHUNK_COORD:
+		# Use current position to determine chunk
+		target_chunk = _world_to_chunk(world_pos)
+	
+	_remove_villager_entity_from_all_chunks(entity_id)
+	
+	var new_entry := {
+		"entity_id": entity_id,
+		"position": [world_pos.x, world_pos.y, world_pos.z],
+		"rotation_y": rotation_y,
+		"task_start_build_id": task_start_id,
+		"task_end_build_id": task_end_id,
+		"carrying_item": carrying_item,
+		"task_state": task_state,
+	}
+	new_entry["origin_chunk"] = [target_chunk.x, target_chunk.y]
+
+	# Insert into target chunk
+	var chunk_data := _load_chunk(target_chunk)
+	var villagers := chunk_data.get("villagers", []) as Array
+	villagers.append(new_entry)
+	_mark_chunk_dirty(chunk_data)
+
+
+func _remove_villager_entity_from_all_chunks(entity_id: String) -> void:
+	if entity_id.is_empty():
+		return
+	for key in _chunk_cache.keys():
+		var cached := _chunk_cache[key] as Dictionary
+		var villagers_old := cached.get("villagers", []) as Array
+		var removed := false
+		for i in range(villagers_old.size() - 1, -1, -1):
+			var old_entry := villagers_old[i] as Dictionary
+			if str(old_entry.get("entity_id", "")) == entity_id:
+				villagers_old.remove_at(i)
+				removed = true
+		if removed:
+			_mark_chunk_dirty(cached)
+
+
 func save_dirty(force: bool) -> void:
 	if _dirty_keys.is_empty():
 		if force:
 			_autosave_timer = 0.0
-		return
+			return
 
 	if not force and _autosave_timer < AUTOSAVE_INTERVAL:
 		return
@@ -171,6 +223,35 @@ func save_dirty(force: bool) -> void:
 	_autosave_timer = 0.0
 	if any_dirty:
 		_write_meta(true)
+	_save_player_position_to_disk()
+
+
+func save_player_position(pos_data: Dictionary) -> void:
+	_player_position_cache = pos_data.duplicate(true)
+	_save_player_position_to_disk()
+
+
+func _load_player_position() -> void:
+	var player_path = "%s/player.json" % world_dir
+	if FileAccess.file_exists(player_path):
+		var f = FileAccess.open(player_path, FileAccess.READ)
+		if f != null:
+			var parsed = JSON.parse_string(f.get_as_text())
+			if parsed is Dictionary:
+				_player_position_cache = parsed as Dictionary
+
+
+func _save_player_position_to_disk() -> void:
+	if _player_position_cache.is_empty():
+		return
+	var player_path = "%s/player.json" % world_dir
+	var f = FileAccess.open(player_path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(_player_position_cache, "\t"))
+
+
+func get_player_position() -> Dictionary:
+	return _player_position_cache.duplicate(true)
 
 
 func _chunk_key(coord: Vector2i) -> String:
@@ -225,6 +306,7 @@ func _load_chunk(coord: Vector2i) -> Dictionary:
 		"added": [],
 		"removed": [],
 		"destroyed": [],
+		"villagers": [],
 		"dirty": false,
 	}
 
@@ -241,8 +323,16 @@ func _load_chunk(coord: Vector2i) -> Dictionary:
 					chunk_data["removed"] = (dict.get("removed", []) as Array).duplicate(true)
 				if dict.get("destroyed", []) is Array:
 					chunk_data["destroyed"] = (dict.get("destroyed", []) as Array).duplicate(true)
+				if dict.get("villagers", []) is Array:
+					chunk_data["villagers"] = (dict.get("villagers", []) as Array).duplicate(true)
 
-	_normalize_chunk_data(chunk_data)
+	var normalized_changed := _normalize_chunk_data(chunk_data)
+	if normalized_changed:
+		_mark_chunk_dirty(chunk_data)
+	if _migrate_legacy_villager_ids(chunk_data):
+		_mark_chunk_dirty(chunk_data)
+	if _rebucket_villagers_to_origin_chunk(chunk_data):
+		_mark_chunk_dirty(chunk_data)
 
 	_chunk_cache[key] = chunk_data
 	return chunk_data
@@ -253,9 +343,10 @@ func _save_chunk(chunk_data: Dictionary) -> void:
 	var added := chunk_data.get("added", []) as Array
 	var removed := chunk_data.get("removed", []) as Array
 	var destroyed := chunk_data.get("destroyed", []) as Array
+	var villagers := chunk_data.get("villagers", []) as Array
 	var path := _chunk_path(coord)
-
-	if added.is_empty() and removed.is_empty() and destroyed.is_empty():
+	
+	if added.is_empty() and removed.is_empty() and destroyed.is_empty() and villagers.is_empty():
 		if FileAccess.file_exists(path):
 			DirAccess.remove_absolute(path)
 		return
@@ -266,6 +357,7 @@ func _save_chunk(chunk_data: Dictionary) -> void:
 		"added": added,
 		"removed": removed,
 		"destroyed": destroyed,
+		"villagers": villagers,
 	}
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f != null:
@@ -278,7 +370,8 @@ func _mark_chunk_dirty(chunk_data: Dictionary) -> void:
 	_dirty_keys[_chunk_key(coord)] = true
 
 
-func _normalize_chunk_data(chunk_data: Dictionary) -> void:
+func _normalize_chunk_data(chunk_data: Dictionary) -> bool:
+	var changed := false
 	var added_in := chunk_data.get("added", []) as Array
 	var added_seen: Dictionary = {}
 	var added_out: Array = []
@@ -291,6 +384,8 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> void:
 			continue
 		added_seen[key] = true
 		added_out.append(entry)
+	if added_out.size() != added_in.size():
+		changed = true
 	chunk_data["added"] = added_out
 
 	var removed_in := chunk_data.get("removed", []) as Array
@@ -308,6 +403,8 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> void:
 			continue
 		removed_seen[key] = true
 		removed_out.append(entry)
+	if removed_out.size() != removed_in.size():
+		changed = true
 	chunk_data["removed"] = removed_out
 
 	var destroyed_in := chunk_data.get("destroyed", []) as Array
@@ -325,11 +422,36 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> void:
 			continue
 		destroyed_seen[key] = true
 		destroyed_out.append(entry)
+	if destroyed_out.size() != destroyed_in.size():
+		changed = true
 	chunk_data["destroyed"] = destroyed_out
+
+	var villagers_in := chunk_data.get("villagers", []) as Array
+	var villagers_seen: Dictionary = {}
+	var villagers_out: Array = []
+	for entry_variant in villagers_in:
+		var entry := entry_variant as Dictionary
+		var entity_id := str(entry.get("entity_id", ""))
+		if entity_id.is_empty():
+			continue
+		var pos := _entry_position(entry)
+		if pos == Vector3.ZERO:
+			changed = true
+			continue
+		var key := entity_id
+		if villagers_seen.has(key):
+			changed = true
+			continue
+		villagers_seen[key] = true
+		villagers_out.append(entry)
+	if villagers_out.size() != villagers_in.size():
+		changed = true
+	chunk_data["villagers"] = villagers_out
+	return changed
 
 
 func _entry_position(entry: Dictionary) -> Vector3:
-	var arr: Variant = entry.get("position", [])
+	var arr = entry.get("position", [])
 	if not (arr is Array):
 		return Vector3.ZERO
 	var pos_array := arr as Array
@@ -340,3 +462,96 @@ func _entry_position(entry: Dictionary) -> Vector3:
 		float(pos_array[1]),
 		float(pos_array[2])
 	)
+
+
+func _villager_entries_equal(a: Dictionary, b: Dictionary) -> bool:
+	if str(a.get("entity_id", "")) != str(b.get("entity_id", "")):
+		return false
+	if str(a.get("task_start_build_id", "")) != str(b.get("task_start_build_id", "")):
+		return false
+	if str(a.get("task_end_build_id", "")) != str(b.get("task_end_build_id", "")):
+		return false
+	if bool(a.get("carrying_item", false)) != bool(b.get("carrying_item", false)):
+		return false
+	if int(a.get("task_state", 0)) != int(b.get("task_state", 0)):
+		return false
+	if absf(float(a.get("rotation_y", 0.0)) - float(b.get("rotation_y", 0.0))) > 0.01:
+		return false
+	var pa := _entry_position(a)
+	var pb := _entry_position(b)
+	if pa.distance_squared_to(pb) > 0.01 * 0.01:
+		return false
+	return true
+
+
+func _villager_origin_chunk_from_id(entity_id: String, fallback_pos: Vector3) -> Vector2i:
+	var parts := entity_id.split("|")
+	if parts.size() >= 4:
+		if parts[3] == "villager":
+			var cx := int(parts[1])
+			var cz := int(parts[2])
+			return Vector2i(cx, cz)
+	return _world_to_chunk(fallback_pos)
+
+
+func _origin_chunk_from_entry(entry: Dictionary, fallback_pos: Vector3) -> Vector2i:
+	var entity_id := str(entry.get("entity_id", ""))
+	if not entity_id.is_empty():
+		var parts := entity_id.split("|")
+		if parts.size() >= 4 and parts[3] == "villager":
+			return Vector2i(int(parts[1]), int(parts[2]))
+	var arr = entry.get("origin_chunk", null)
+	if arr is Array:
+		var vec := arr as Array
+		if vec.size() >= 2:
+			return Vector2i(int(vec[0]), int(vec[1]))
+	return _villager_origin_chunk_from_id(entity_id, fallback_pos)
+
+
+func _rebucket_villagers_to_origin_chunk(chunk_data: Dictionary) -> bool:
+	var coord := chunk_data.get("coord", Vector2i.ZERO) as Vector2i
+	var villagers := chunk_data.get("villagers", []) as Array
+	if villagers.is_empty():
+		return false
+	var keep: Array = []
+	var moved := false
+	for entry_variant in villagers:
+		var entry := entry_variant as Dictionary
+		var entity_id := str(entry.get("entity_id", ""))
+		var pos := _entry_position(entry)
+		var origin := _origin_chunk_from_entry(entry, pos)
+		entry["origin_chunk"] = [origin.x, origin.y]
+		if origin == coord:
+			keep.append(entry)
+			continue
+		var target := _load_chunk(origin)
+		var target_villagers := target.get("villagers", []) as Array
+		target_villagers.append(entry.duplicate(true))
+		_mark_chunk_dirty(target)
+		moved = true
+	if moved:
+		chunk_data["villagers"] = keep
+	return moved
+
+
+func _migrate_legacy_villager_ids(chunk_data: Dictionary) -> bool:
+	var villagers := chunk_data.get("villagers", []) as Array
+	if villagers.is_empty():
+		return false
+	var changed := false
+	var coord := chunk_data.get("coord", Vector2i.ZERO) as Vector2i
+	for entry_variant in villagers:
+		var entry := entry_variant as Dictionary
+		var entity_id := str(entry.get("entity_id", ""))
+		if entity_id.find("|villager|Village|") != -1:
+			var legacy_name := str(entry.get("legacy_name", ""))
+			if legacy_name.is_empty():
+				var parts := entity_id.split("|")
+				if parts.size() >= 5:
+					legacy_name = "Villager_%s" % parts[4]
+			if not legacy_name.is_empty():
+				entry["legacy_name"] = legacy_name
+				var pos := _entry_position(entry)
+				entry["entity_id"] = "%d|%d|%d|villager|%s|%.3f|%.3f" % [world_seed + 2000, coord.x, coord.y, legacy_name, pos.x, pos.z]
+			changed = true
+	return changed

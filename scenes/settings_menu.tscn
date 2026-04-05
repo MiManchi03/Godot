@@ -228,6 +228,10 @@ size_flags_vertical = 3
 layout_mode = 2
 text = "关闭"
 
+[node name="ExitGameButton" type="Button" parent="Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "结束游戏并保存"
+
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/YawMinus" to="." method="_on_yaw_minus_pressed"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/YawPlus" to="." method="_on_yaw_plus_pressed"]
 [connection signal="toggled" from="Panel/MarginContainer/VBoxContainer/CameraDragEnabledCheckBox" to="." method="_on_camera_drag_enabled_toggled"]
@@ -243,6 +247,7 @@ text = "关闭"
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowStrengthRow/MouseFollowStrengthPlus" to="." method="_on_mouse_follow_strength_plus_pressed"]
 [connection signal="toggled" from="Panel/MarginContainer/VBoxContainer/CameraMouseFollowEnabledCheckBox" to="." method="_on_camera_mouse_follow_enabled_toggled"]
 [connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/CloseButton" to="." method="_on_close_button_pressed"]
+[connection signal="pressed" from="Panel/MarginContainer/VBoxContainer/ExitGameButton" to="." method="_on_exit_game_button_pressed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/RightDragYawRow/RightDragYawSlider" to="." method="_on_right_drag_yaw_slider_value_changed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/CameraDragSensitivityRow/CameraDragSensitivitySlider" to="." method="_on_camera_drag_sensitivity_slider_value_changed"]
 [connection signal="value_changed" from="Panel/MarginContainer/VBoxContainer/BuildDragSensitivityRow/BuildDragSensitivitySlider" to="." method="_on_build_drag_sensitivity_slider_value_changed"]
