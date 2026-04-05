@@ -23,6 +23,9 @@ enum TaskState {
 
 var _question_timer: float = 0.0
 var _task_replan_timer: float = 0.0
+var _building_cache_timer: float = 0.0
+var _cached_start_pos: Vector3 = Vector3.ZERO
+var _cached_end_pos: Vector3 = Vector3.ZERO
 var _task_state: TaskState = TaskState.UNBOUND
 var _current_path: Array[Vector2i] = []
 var _path_index: int = 0
@@ -33,6 +36,7 @@ var _hint_sprite: Sprite3D
 var _item_sprite: Sprite3D
 
 func _ready() -> void:
+	add_to_group("villager")
 	_setup_hints()
 	_last_cell = _current_cell()
 
@@ -70,6 +74,9 @@ func _setup_hints() -> void:
 func set_task(start_id: String, end_id: String) -> void:
 	task_start_build_id = start_id
 	task_end_build_id = end_id
+	_building_cache_timer = 0.0
+	_cached_start_pos = Vector3.ZERO
+	_cached_end_pos = Vector3.ZERO
 	if task_start_build_id.is_empty() or task_end_build_id.is_empty():
 		_task_state = TaskState.UNBOUND
 	else:
@@ -84,6 +91,9 @@ func has_task() -> bool:
 func cancel_task() -> void:
 	task_start_build_id = ""
 	task_end_build_id = ""
+	_building_cache_timer = 0.0
+	_cached_start_pos = Vector3.ZERO
+	_cached_end_pos = Vector3.ZERO
 	_task_state = TaskState.UNBOUND
 	_current_path.clear()
 	_path_index = 0
@@ -99,6 +109,7 @@ func _current_cell() -> Vector2i:
 
 func _physics_process(delta: float) -> void:
 	_update_hint_visibility(delta)
+	_building_cache_timer = maxf(_building_cache_timer - delta, 0.0)
 	
 	var road_network: Node = null
 	var world_manager: Node = null
@@ -235,8 +246,9 @@ func _try_start_task(delta: float, road_network: Node) -> void:
 		return
 	
 	# Find start and end building positions
-	var start_pos := _find_building_position(task_start_build_id)
-	var end_pos := _find_building_position(task_end_build_id)
+	var pair := _get_task_building_positions()
+	var start_pos := pair[0] as Vector3
+	var end_pos := pair[1] as Vector3
 	
 	if start_pos == Vector3.ZERO or end_pos == Vector3.ZERO:
 		_question_timer = QUESTION_SHOW_TIME
@@ -308,7 +320,7 @@ func _regenerate_path_to_end() -> void:
 		return
 	
 	var current_cell := _current_cell()
-	var end_pos := _find_building_position(task_end_build_id)
+	var end_pos := _get_cached_building_position(task_end_build_id, false)
 	if end_pos == Vector3.ZERO:
 		_current_path.clear()
 		_path_index = 0
@@ -337,7 +349,7 @@ func _regenerate_path_to_start() -> void:
 		return
 	
 	var current_cell := _current_cell()
-	var start_pos := _find_building_position(task_start_build_id)
+	var start_pos := _get_cached_building_position(task_start_build_id, true)
 	if start_pos == Vector3.ZERO:
 		_current_path.clear()
 		_path_index = 0
@@ -394,6 +406,24 @@ func _find_building_position(build_id: String) -> Vector3:
 	return Vector3.ZERO
 
 
+func _get_task_building_positions() -> Array:
+	if _building_cache_timer <= 0.0 or _cached_start_pos == Vector3.ZERO or _cached_end_pos == Vector3.ZERO:
+		_cached_start_pos = _find_building_position(task_start_build_id)
+		_cached_end_pos = _find_building_position(task_end_build_id)
+		_building_cache_timer = 0.8
+	return [_cached_start_pos, _cached_end_pos]
+
+
+func _get_cached_building_position(build_id: String, is_start: bool) -> Vector3:
+	if build_id.is_empty():
+		return Vector3.ZERO
+	if _building_cache_timer <= 0.0:
+		_cached_start_pos = _find_building_position(task_start_build_id)
+		_cached_end_pos = _find_building_position(task_end_build_id)
+		_building_cache_timer = 0.8
+	return _cached_start_pos if is_start else _cached_end_pos
+
+
 func _move_towards(target: Vector3, delta: float) -> void:
 	var dir := target - global_position
 	dir.y = 0.0
@@ -416,6 +446,9 @@ func _on_pickup() -> void:
 	else:
 		_task_state = TaskState.UNBOUND
 	_task_replan_timer = 0.0
+	_building_cache_timer = 0.0
+	_cached_start_pos = Vector3.ZERO
+	_cached_end_pos = Vector3.ZERO
 	_current_path.clear()
 	_path_index = 0
 	carrying_item = false
@@ -453,6 +486,9 @@ func on_loaded_from_save() -> void:
 		_task_state = TaskState.WAITING
 	else:
 		_task_state = TaskState.UNBOUND
+	_building_cache_timer = 0.0
+	_cached_start_pos = Vector3.ZERO
+	_cached_end_pos = Vector3.ZERO
 
 
 func _try_auto_bind_task() -> void:

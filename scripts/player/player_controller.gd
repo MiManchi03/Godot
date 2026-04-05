@@ -96,6 +96,8 @@ var _build_camera_rotation: float = 0.0
 var _build_drag_pan_factor: float = 0.035
 var _build_drag_map: bool = false
 var _build_last_mouse: Vector2 = Vector2.ZERO
+var _spawn_lock_timer: float = 0.0
+var _spawn_ready: bool = false
 var _build_last_left_click_ms: int = -100000
 var _build_last_left_click_pos: Vector2 = Vector2.ZERO
 var _build_ignore_place_until_ms: int = 0
@@ -180,6 +182,11 @@ func _ready() -> void:
 	get_viewport().gui_release_focus()
 	get_viewport().grab_focus()
 	print("Mouse mode set to VISIBLE, focus grabbed")
+	var world_manager: Node = get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_signal("player_spawn_ready"):
+		world_manager.connect("player_spawn_ready", Callable(self, "_on_world_player_spawn_ready"))
+	_spawn_ready = false
+	_spawn_lock_timer = 0.8
 
 
 func base_seed() -> int:
@@ -505,6 +512,17 @@ func _settings_get_bool(property_name: String, fallback: bool) -> bool:
 	return fallback
 
 func _physics_process(delta: float) -> void:
+	if not _spawn_ready:
+		_spawn_lock_timer -= delta
+		if _spawn_lock_timer <= 0.0:
+			_spawn_ready = true
+		else:
+			velocity = Vector3.ZERO
+			move_and_slide()
+			return
+	if global_position.y < -80.0:
+		global_position.y = 2.0
+		velocity = Vector3.ZERO
 	if _build_mode:
 		_update_build_mode(delta)
 		return
@@ -520,6 +538,11 @@ func _physics_process(delta: float) -> void:
 	_update_destruction(delta)
 	_update_destroy_ui_timers(delta)
 	move_and_slide()
+
+
+func _on_world_player_spawn_ready(_safe_position: Vector3) -> void:
+	_spawn_ready = true
+	_spawn_lock_timer = 0.0
 
 func _update_sprint_state() -> void:
 	if Input.is_action_just_pressed("move_forward"):

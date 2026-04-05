@@ -15,6 +15,7 @@ var _chunk_cache: Dictionary = {}
 var _dirty_keys: Dictionary = {}
 var _autosave_timer: float = 0.0
 var _player_position_cache: Dictionary = {}
+var _villager_chunk_index: Dictionary = {}
 
 
 func _init(seed: int, chunk_span: int) -> void:
@@ -165,7 +166,7 @@ func upsert_villager_state(entity_id: String, world_pos: Vector3, rotation_y: fl
 		# Use current position to determine chunk
 		target_chunk = _world_to_chunk(world_pos)
 	
-	_remove_villager_entity_from_all_chunks(entity_id)
+	_remove_villager_entity_fast(entity_id)
 	
 	var new_entry := {
 		"entity_id": entity_id,
@@ -182,23 +183,41 @@ func upsert_villager_state(entity_id: String, world_pos: Vector3, rotation_y: fl
 	var chunk_data := _load_chunk(target_chunk)
 	var villagers := chunk_data.get("villagers", []) as Array
 	villagers.append(new_entry)
+	_villager_chunk_index[entity_id] = _chunk_key(target_chunk)
 	_mark_chunk_dirty(chunk_data)
 
 
-func _remove_villager_entity_from_all_chunks(entity_id: String) -> void:
+func _remove_villager_entity_fast(entity_id: String) -> void:
 	if entity_id.is_empty():
 		return
+	var indexed_chunk_key := str(_villager_chunk_index.get(entity_id, ""))
+	if not indexed_chunk_key.is_empty():
+		var coord := _coord_from_chunk_key(indexed_chunk_key)
+		if coord != INVALID_CHUNK_COORD:
+			var chunk_data := _load_chunk(coord)
+			if _remove_entity_from_chunk_data(chunk_data, entity_id):
+				_villager_chunk_index.erase(entity_id)
+				return
+		_villager_chunk_index.erase(entity_id)
+	# Fallback path for old data/index misses.
 	for key in _chunk_cache.keys():
 		var cached := _chunk_cache[key] as Dictionary
-		var villagers_old := cached.get("villagers", []) as Array
-		var removed := false
-		for i in range(villagers_old.size() - 1, -1, -1):
-			var old_entry := villagers_old[i] as Dictionary
-			if str(old_entry.get("entity_id", "")) == entity_id:
-				villagers_old.remove_at(i)
-				removed = true
-		if removed:
-			_mark_chunk_dirty(cached)
+		if _remove_entity_from_chunk_data(cached, entity_id):
+			_villager_chunk_index.erase(entity_id)
+			return
+
+
+func _remove_entity_from_chunk_data(chunk_data: Dictionary, entity_id: String) -> bool:
+	var villagers_old := chunk_data.get("villagers", []) as Array
+	var removed := false
+	for i in range(villagers_old.size() - 1, -1, -1):
+		var old_entry := villagers_old[i] as Dictionary
+		if str(old_entry.get("entity_id", "")) == entity_id:
+			villagers_old.remove_at(i)
+			removed = true
+	if removed:
+		_mark_chunk_dirty(chunk_data)
+	return removed
 
 
 func save_dirty(force: bool) -> void:
@@ -256,6 +275,13 @@ func get_player_position() -> Dictionary:
 
 func _chunk_key(coord: Vector2i) -> String:
 	return "%d_%d" % [coord.x, coord.y]
+
+
+func _coord_from_chunk_key(key: String) -> Vector2i:
+	var parts := key.split("_")
+	if parts.size() != 2:
+		return INVALID_CHUNK_COORD
+	return Vector2i(int(parts[0]), int(parts[1]))
 
 
 func _chunk_path(coord: Vector2i) -> String:
@@ -333,6 +359,7 @@ func _load_chunk(coord: Vector2i) -> Dictionary:
 		_mark_chunk_dirty(chunk_data)
 	if _rebucket_villagers_to_origin_chunk(chunk_data):
 		_mark_chunk_dirty(chunk_data)
+	_index_chunk_villagers(chunk_data)
 
 	_chunk_cache[key] = chunk_data
 	return chunk_data
@@ -368,6 +395,18 @@ func _mark_chunk_dirty(chunk_data: Dictionary) -> void:
 	chunk_data["dirty"] = true
 	var coord := chunk_data.get("coord", Vector2i.ZERO) as Vector2i
 	_dirty_keys[_chunk_key(coord)] = true
+
+
+func _index_chunk_villagers(chunk_data: Dictionary) -> void:
+	var coord := chunk_data.get("coord", Vector2i.ZERO) as Vector2i
+	var key := _chunk_key(coord)
+	var villagers := chunk_data.get("villagers", []) as Array
+	for entry_variant in villagers:
+		var entry := entry_variant as Dictionary
+		var entity_id := str(entry.get("entity_id", ""))
+		if entity_id.is_empty():
+			continue
+		_villager_chunk_index[entity_id] = key
 
 
 func _normalize_chunk_data(chunk_data: Dictionary) -> bool:
@@ -531,6 +570,7 @@ func _rebucket_villagers_to_origin_chunk(chunk_data: Dictionary) -> bool:
 		moved = true
 	if moved:
 		chunk_data["villagers"] = keep
+		_index_chunk_villagers(chunk_data)
 	return moved
 
 

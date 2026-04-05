@@ -1,5 +1,7 @@
 extends Node3D
 
+signal player_spawn_ready(safe_position: Vector3)
+
 const CHUNK_SIZE := 32
 const LOAD_RADIUS := 5
 const UNLOAD_RADIUS := 7
@@ -7,6 +9,11 @@ const CHUNK_CREATES_PER_FRAME := 2
 const VILLAGER_SNAPSHOT_INTERVAL := 5.0
 const VILLAGER_SAVE_POS_EPS := 0.2
 const VILLAGER_SAVE_ROT_EPS := 0.08
+const PLAYER_SAFE_LIFT := 1.2
+const PLAYER_SPAWN_RAY_UP := 8.0
+const PLAYER_SPAWN_RAY_DOWN := 64.0
+const PLAYER_MIN_SAFE_Y := -20.0
+const PLAYER_FALLBACK_Y := 2.0
 
 @export var world_seed: int = 91357
 
@@ -44,6 +51,8 @@ func _ready() -> void:
 
 	_load_saved_player_position()
 	_building_cache_dirty = true
+	_ensure_player_chunk_loaded_now()
+	_emit_player_spawn_ready()
 
 	_update_chunks_around_player()
 
@@ -69,6 +78,7 @@ func _exit_tree() -> void:
 
 func _update_chunks_around_player() -> void:
 	var player_chunk := _world_to_chunk(player.global_position)
+	_ensure_chunk_loaded_now(player_chunk)
 	var desired: Dictionary = {}
 
 	for x in range(player_chunk.x - LOAD_RADIUS, player_chunk.x + LOAD_RADIUS + 1):
@@ -102,14 +112,32 @@ func _update_chunks_around_player() -> void:
 	_process_chunk_create_queue(player_chunk)
 
 
+func _ensure_player_chunk_loaded_now() -> void:
+	if player == null:
+		return
+	var player_chunk := _world_to_chunk(player.global_position)
+	_ensure_chunk_loaded_now(player_chunk)
+
+
+func _ensure_chunk_loaded_now(coord: Vector2i) -> void:
+	if loaded_chunks.has(coord):
+		return
+	_pending_chunk_set.erase(coord)
+	for i in range(_pending_chunk_coords.size() - 1, -1, -1):
+		if _pending_chunk_coords[i] == coord:
+			_pending_chunk_coords.remove_at(i)
+	_create_chunk(coord)
+
+
 func _process_chunk_create_queue(player_chunk: Vector2i) -> void:
 	if _pending_chunk_coords.is_empty():
 		return
-	_pending_chunk_coords.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
-		var da := absi(a.x - player_chunk.x) + absi(a.y - player_chunk.y)
-		var db := absi(b.x - player_chunk.x) + absi(b.y - player_chunk.y)
-		return da < db
-	)
+	if _pending_chunk_coords.size() > CHUNK_CREATES_PER_FRAME * 2:
+		_pending_chunk_coords.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+			var da := absi(a.x - player_chunk.x) + absi(a.y - player_chunk.y)
+			var db := absi(b.x - player_chunk.x) + absi(b.y - player_chunk.y)
+			return da < db
+		)
 	var budget := CHUNK_CREATES_PER_FRAME
 	while budget > 0 and not _pending_chunk_coords.is_empty():
 		var coord: Vector2i = _pending_chunk_coords.pop_front() as Vector2i
@@ -283,6 +311,8 @@ func save_all_player_changes() -> void:
 func _save_player_position() -> void:
 	if player == null:
 		return
+	if player.global_position.y < PLAYER_MIN_SAFE_Y:
+		return
 	var player_pos = {
 		"position": [player.global_position.x, player.global_position.y, player.global_position.z],
 		"rotation": player.rotation.y,
@@ -303,16 +333,63 @@ func _load_saved_player_position() -> void:
 	var new_pos = Vector3(float(pos_arr[0]), float(pos_arr[1]), float(pos_arr[2]))
 	if new_pos == Vector3.ZERO:
 		return
-	player.global_position = new_pos
+	player.global_position = _resolve_safe_player_spawn(new_pos)
 	var rot = saved_pos.get("rotation", 0.0)
 	player.rotation.y = float(rot)
-	print("[LOAD] 玩家位置已恢复: ", new_pos, " 旋转: ", rot)
+	print("[LOAD] 玩家位置已恢复: ", player.global_position, " 旋转: ", rot)
+
+
+func _resolve_safe_player_spawn(target_pos: Vector3) -> Vector3:
+	var coord := _world_to_chunk(target_pos)
+	_ensure_chunk_loaded_now(coord)
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			_ensure_chunk_loaded_now(coord + Vector2i(dx, dz))
+	var safe := _find_ground_safe_position(target_pos)
+	if safe != Vector3.ZERO:
+		return safe
+	return Vector3(target_pos.x, PLAYER_FALLBACK_Y, target_pos.z)
+
+
+func _find_ground_safe_position(target_pos: Vector3) -> Vector3:
+	var world3d := get_world_3d()
+	if world3d == null:
+		return Vector3.ZERO
+	var from := target_pos + Vector3(0.0, PLAYER_SPAWN_RAY_UP, 0.0)
+	var to := target_pos - Vector3(0.0, PLAYER_SPAWN_RAY_DOWN, 0.0)
+	var params := PhysicsRayQueryParameters3D.create(from, to)
+	params.collide_with_areas = false
+	params.collide_with_bodies = true
+	params.collision_mask = 1
+	var hit: Dictionary = world3d.direct_space_state.intersect_ray(params)
+	if hit.is_empty():
+		return Vector3.ZERO
+	var p_val = hit.get("position", null)
+	if p_val is Vector3:
+		var p := p_val as Vector3
+		return p + Vector3(0.0, PLAYER_SAFE_LIFT, 0.0)
+	return Vector3.ZERO
+
+
+func _emit_player_spawn_ready() -> void:
+	if player == null:
+		return
+	emit_signal("player_spawn_ready", player.global_position)
 
 
 func _snapshot_loaded_villagers(force_save: bool = false) -> void:
-	for chunk_root_variant in loaded_chunks.values():
-		var chunk_root := chunk_root_variant as Node3D
-		_snapshot_chunk_villagers(chunk_root, force_save)
+	if get_tree() == null:
+		return
+	var villagers := get_tree().get_nodes_in_group("villager")
+	for node in villagers:
+		if not (node is Node3D):
+			continue
+		var node3d := node as Node3D
+		var entity_id := str(node3d.get_meta("entity_id", ""))
+		if entity_id.is_empty():
+			continue
+		if force_save or _villager_needs_save(node3d):
+			save_villager_state(node3d, force_save)
 
 
 func _snapshot_chunk_villagers(chunk_root: Node3D, force_save: bool = false) -> void:
@@ -361,6 +438,9 @@ func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> v
 	var removed := chunk_data.get("removed", []) as Array
 	if not removed.is_empty():
 		_apply_removed_originals(chunk_root, removed)
+	var nearby_removed := _collect_neighbor_removed_entries(coord, 1)
+	if not nearby_removed.is_empty():
+		_apply_removed_originals(chunk_root, nearby_removed)
 
 	var added := chunk_data.get("added", []) as Array
 	for entry_variant in added:
@@ -380,10 +460,45 @@ func _apply_player_buildings_for_chunk(coord: Vector2i, chunk_root: Node3D) -> v
 	var destroyed := chunk_data.get("destroyed", []) as Array
 	if not destroyed.is_empty():
 		_apply_destroyed_resources(chunk_root, destroyed)
+	var nearby_destroyed := _collect_neighbor_destroyed_entries(coord, 1)
+	if not nearby_destroyed.is_empty():
+		_apply_destroyed_resources(chunk_root, nearby_destroyed)
 
 	var villagers := chunk_data.get("villagers", []) as Array
 	if not villagers.is_empty():
 		_apply_saved_villagers(chunk_root, villagers)
+
+
+func _collect_neighbor_removed_entries(center: Vector2i, radius: int) -> Array:
+	if world_state == null or radius <= 0:
+		return []
+	var out: Array = []
+	for dx in range(-radius, radius + 1):
+		for dz in range(-radius, radius + 1):
+			if dx == 0 and dz == 0:
+				continue
+			var c := center + Vector2i(dx, dz)
+			var data := world_state.get_chunk_data(c)
+			var removed := data.get("removed", []) as Array
+			if not removed.is_empty():
+				out.append_array(removed)
+	return out
+
+
+func _collect_neighbor_destroyed_entries(center: Vector2i, radius: int) -> Array:
+	if world_state == null or radius <= 0:
+		return []
+	var out: Array = []
+	for dx in range(-radius, radius + 1):
+		for dz in range(-radius, radius + 1):
+			if dx == 0 and dz == 0:
+				continue
+			var c := center + Vector2i(dx, dz)
+			var data := world_state.get_chunk_data(c)
+			var destroyed := data.get("destroyed", []) as Array
+			if not destroyed.is_empty():
+				out.append_array(destroyed)
+	return out
 
 
 
