@@ -932,6 +932,13 @@ func _stash_picked_original(target: Node3D, build_id: String, pos: Vector3, rot_
 	_build_picked_original_collision.clear()
 	_set_building_collision_enabled(target, false)
 	target.visible = false
+	if build_id == "road":
+		target.set_meta("picked_hidden", true)
+		target.set_meta("pending_delete", false)
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager and world_manager.has_method("begin_pickup_road"):
+			var cell := Vector2i(roundi(pos.x), roundi(pos.z))
+			world_manager.call("begin_pickup_road", cell)
 
 
 func _finalize_picked_original() -> void:
@@ -940,6 +947,8 @@ func _finalize_picked_original() -> void:
 		return
 	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager:
+		if _build_picked_original_build_id == "road":
+			_build_picked_original.set_meta("pending_delete", true)
 		world_manager.call(
 			"on_pick_existing_building",
 			_build_picked_original_build_id,
@@ -949,6 +958,8 @@ func _finalize_picked_original() -> void:
 			_build_picked_original_entity_id
 		)
 	_build_mode_has_changes = true
+	if _build_picked_original_build_id == "road" and is_instance_valid(_build_picked_original):
+		_build_picked_original.set_meta("picked_hidden", false)
 	_build_picked_original.queue_free()
 	_clear_picked_original()
 
@@ -961,6 +972,12 @@ func _restore_picked_original() -> void:
 		_clear_picked_original()
 		return
 	_set_building_collision_enabled(_build_picked_original, true)
+	if _build_picked_original_build_id == "road":
+		_build_picked_original.set_meta("picked_hidden", false)
+		_build_picked_original.set_meta("pending_delete", false)
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager and world_manager.has_method("cancel_pickup_road"):
+			world_manager.call("cancel_pickup_road", _build_picked_original)
 	_build_picked_original.visible = true
 	_clear_picked_original()
 
@@ -1404,31 +1421,13 @@ func _resolve_build_id(node3d: Node3D) -> String:
 
 
 func _build_id_from_node_name(node_name: String) -> String:
-	var lower := node_name.to_lower()
-	if lower.find("warehouse") != -1:
-		return "warehouse"
-	if lower.find("house") != -1:
-		return "house"
-	if lower.find("workshop") != -1:
-		return "workshop"
-	if lower.find("market") != -1:
-		return "market"
-	if lower.find("well") != -1:
-		return "well"
-	if lower.find("campfire") != -1:
-		return "campfire"
-	if lower.find("fencepost") != -1 or lower.find("fence_post") != -1 or lower.find("fence") != -1:
-		return "fencepost"
-	if lower.find("road") != -1:
-		return "road"
-	if lower.find("farm") != -1:
-		return "farm"
-	if lower.find("tower") != -1:
-		return "tower"
-	if lower.find("barrack") != -1:
-		return "barrack"
+	# 仅接受严格命名，避免把系统节点（如 RoadGridMap）识别为可拾取道路。
+	var base := node_name
+	var us_idx := base.find("_")
+	if us_idx > 0:
+		base = base.substr(0, us_idx)
 
-	match node_name:
+	match base:
 		"House":
 			return "house"
 		"Workshop":
@@ -1518,6 +1517,25 @@ func _find_nearest_building_root(world_pos: Vector3, radius: float) -> Node3D:
 	return best
 
 
+func _find_nearest_road_at_position(world_pos: Vector3, max_dist: float) -> Node3D:
+	var world_root := get_node_or_null("/root/World")
+	if world_root == null:
+		return null
+	var candidates: Array[Node3D] = []
+	_collect_building_roots(world_root, candidates)
+	var best: Node3D = null
+	var best_d2 := max_dist * max_dist
+	for b in candidates:
+		var build_id := _resolve_build_id(b)
+		if build_id != "road":
+			continue
+		var d2 := b.global_position.distance_squared_to(world_pos)
+		if d2 <= best_d2:
+			best_d2 = d2
+			best = b
+	return best
+
+
 func _try_pick_existing_building_to_preview() -> bool:
 	if not camera:
 		if BUILD_PICK_DEBUG:
@@ -1529,9 +1547,39 @@ func _try_pick_existing_building_to_preview() -> bool:
 	var direction := camera.project_ray_normal(mouse_pos)
 	if BUILD_PICK_DEBUG:
 		print("[BUILD_PICK] try pick at mouse=", mouse_pos, " origin=", origin, " dir=", direction)
+	var world_manager_node := get_node_or_null("/root/World/WorldManager")
+	if absf(direction.y) > 0.0001 and world_manager_node and world_manager_node.has_method("get_road_node_at_cell"):
+		var t_ground := -origin.y / direction.y
+		if t_ground > 0.0:
+			var ground_pos := origin + direction * t_ground
+			var road_cell := Vector2i(roundi(ground_pos.x), roundi(ground_pos.z))
+			var road_node_variant = world_manager_node.call("get_road_node_at_cell", road_cell)
+			var road_node := road_node_variant as Node3D
+			if road_node != null and is_instance_valid(road_node):
+				var build_id := _resolve_build_id(road_node)
+				if build_id == "road":
+					var picked_pos := road_node.global_position
+					var picked_rot := road_node.rotation.y
+					var picked_variant_seed := int(road_node.get_meta("variant_seed", 0))
+					var was_player_placed := bool(road_node.get_meta("player_placed", false))
+					_cancel_rotate_selection(false)
+					_stash_picked_original(road_node, build_id, picked_pos, picked_rot, was_player_placed)
+					_build_forced_variant_seed = picked_variant_seed
+					_select_building(build_id)
+					if _build_preview and _build_preview.preview_root:
+						_build_preview.preview_root.global_position = picked_pos
+						_build_preview.preview_rotation_deg = rad_to_deg(picked_rot)
+						_build_preview.preview_root.rotation.y = picked_rot
+						return true
+			# 该格标记为道路但没有有效节点：先自愈，避免误删到别的道路
+			if world_manager_node.has_method("has_road_cell") and bool(world_manager_node.call("has_road_cell", road_cell)):
+				if world_manager_node.has_method("reconcile_road_state"):
+					world_manager_node.call("reconcile_road_state")
+				return false
 	var ray := PhysicsRayQueryParameters3D.create(origin, origin + direction * 500.0)
 	ray.collide_with_areas = false
 	ray.collide_with_bodies = true
+	ray.hit_back_faces = true
 	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
 	var building_root: Node3D = null
 	if not hit.is_empty():
@@ -1543,6 +1591,17 @@ func _try_pick_existing_building_to_preview() -> bool:
 			else:
 				print("[BUILD_PICK] ray hit non-node collider=", collider)
 		building_root = _find_building_root_from_collider(collider)
+		# 如果拾取到道路，检查附近是否有更近的道路（防止射线穿过道路边缘击中建筑）
+		if building_root != null:
+			var build_id := _resolve_build_id(building_root)
+			if build_id != "road":
+				# 检查是否有道路在射线附近
+				var hit_pos: Vector3 = hit.get("position", Vector3.ZERO)
+				var nearby_road := _find_nearest_road_at_position(hit_pos, 1.2)
+				if nearby_road != null:
+					building_root = nearby_road
+					if BUILD_PICK_DEBUG:
+						print("[BUILD_PICK] overridden to nearby road: ", nearby_road.name)
 		if building_root == null:
 			var hit_pos: Vector3 = hit.get("position", Vector3.ZERO)
 			if BUILD_PICK_DEBUG:
@@ -1576,6 +1635,14 @@ func _try_pick_existing_building_to_preview() -> bool:
 		return false
 	if BUILD_PICK_DEBUG:
 		print("[BUILD_PICK] resolved build_id=", build_id)
+	if build_id == "road":
+		var wm := get_node_or_null("/root/World/WorldManager")
+		if wm and wm.has_method("get_road_node_at_cell"):
+			var exact_cell := Vector2i(roundi(building_root.global_position.x), roundi(building_root.global_position.z))
+			var exact_variant = wm.call("get_road_node_at_cell", exact_cell)
+			var exact_node := exact_variant as Node3D
+			if exact_node != null and is_instance_valid(exact_node):
+				building_root = exact_node
 
 	var picked_pos := building_root.global_position
 	var picked_rot := building_root.rotation.y
@@ -1585,6 +1652,7 @@ func _try_pick_existing_building_to_preview() -> bool:
 	_stash_picked_original(building_root, build_id, picked_pos, picked_rot, was_player_placed)
 	_build_forced_variant_seed = picked_variant_seed
 	_select_building(build_id)
+	
 	if _build_preview and _build_preview.preview_root:
 		_build_preview.preview_root.global_position = picked_pos
 		_build_preview.preview_rotation_deg = rad_to_deg(picked_rot)
@@ -1595,6 +1663,15 @@ func _try_pick_existing_building_to_preview() -> bool:
 	if BUILD_PICK_DEBUG:
 		print("[BUILD_PICK] fail: preview root missing after select")
 	return false
+
+
+func _highlight_picked_road(road_node: Node3D) -> void:
+	if road_node == null:
+		return
+	var cell := Vector2i(roundi(road_node.global_position.x), roundi(road_node.global_position.z))
+	var world_manager_node := get_node_or_null("/root/World/WorldManager")
+	if world_manager_node and world_manager_node.has_method("highlight_road_cells"):
+		world_manager_node.call("highlight_road_cells", [cell], 1)
 
 
 func _try_pick_villager() -> bool:
@@ -1623,7 +1700,6 @@ func _try_pick_villager() -> bool:
 	
 	var villager_root: Node3D = _find_villager_root_from_collider(collider)
 	if villager_root == null:
-		print("[VILLAGER] _try_pick_villager: no villager root found from collider")
 		return false
 	
 	print("[VILLAGER] _try_pick_villager SUCCESS: picked villager=", villager_root.name)
@@ -1828,6 +1904,8 @@ func _try_place_building_at(place_pos: Vector3) -> bool:
 	_finalize_picked_original()
 	if _build_selected_id == "road":
 		_build_road_painted_any = true
+		# 检查道路连接并显示指示器
+		_check_road_connection_and_highlight(placed.global_position)
 
 	if _build_selected_id == "road":
 		if _build_preview and _build_preview.preview_root:
@@ -1836,6 +1914,61 @@ func _try_place_building_at(place_pos: Vector3) -> bool:
 
 	_cancel_build_selection()
 	return true
+
+
+func _check_road_connection_and_highlight(road_pos: Vector3) -> void:
+	var cell := Vector2i(roundi(road_pos.x), roundi(road_pos.z))
+	
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	
+	var world_manager_node := get_node_or_null("/root/World/WorldManager")
+	if road_network == null or world_manager_node == null:
+		return
+	
+	if not road_network.has_method("get_connected_buildings"):
+		return
+	
+	var connected_raw = road_network.call("get_connected_buildings", cell, world_manager_node)
+	if not (connected_raw is Array):
+		return
+	var connected: Array = connected_raw as Array
+	if connected is Array and not connected.is_empty():
+		var highlight_cells: Array[Vector2i] = []
+		highlight_cells.append(cell)
+		
+		for conn in connected:
+			var conn_dict := conn as Dictionary
+			var path := conn_dict.get("path", []) as Array
+			for p in path:
+				var p_cell := p as Vector2i
+				if not highlight_cells.has(p_cell):
+					highlight_cells.append(p_cell)
+			
+			var building := conn_dict.get("building", null) as Node3D
+			if building != null:
+				_add_building_highlight_to(building)
+		
+		if world_manager_node.has_method("highlight_road_cells"):
+			world_manager_node.call("highlight_road_cells", highlight_cells)
+
+
+func _add_building_highlight_to(building: Node3D) -> void:
+	if building == null:
+		return
+	var existing := building.get_node_or_null("ConnectionHighlight")
+	if existing != null:
+		existing.queue_free()
+	
+	var highlight_script := load("res://scripts/effects/building_highlight.gd")
+	if highlight_script == null:
+		return
+	
+	var highlight := Node3D.new()
+	highlight.name = "ConnectionHighlight"
+	highlight.set_script(highlight_script)
+	building.add_child(highlight)
 
 
 func _grid_cell_from_world(world_pos: Vector3) -> Vector2i:

@@ -170,8 +170,8 @@ func _wander_on_roads(delta: float, road_network: Node) -> void:
 		_generate_wander_path(cell, road_network)
 	
 	if _current_path.is_empty():
-		velocity = Vector3.ZERO
-		move_and_slide()
+		# Fallback: 随机方向移动，而不是静止不动
+		_wander_fallback(delta)
 		return
 	
 	_follow_wander_path(delta)
@@ -230,6 +230,23 @@ func _follow_wander_path(delta: float) -> void:
 		_path_index += 1
 
 
+const WANDER_FALLBACK_SPEED: float = 1.2
+var _wander_fallback_dir: Vector3 = Vector3.ZERO
+var _wander_fallback_timer: float = 0.0
+
+func _wander_fallback(delta: float) -> void:
+	# 当无法生成路径时，随机方向移动
+	_wander_fallback_timer -= delta
+	if _wander_fallback_timer <= 0.0 or _wander_fallback_dir.length_squared() < 0.001:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(hash("%d|%d|%f" % [global_position.x, global_position.z, Time.get_ticks_msec()]))
+		_wander_fallback_dir = Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)).normalized()
+		_wander_fallback_timer = rng.randf_range(1.0, 3.0)
+	
+	velocity = _wander_fallback_dir * WANDER_FALLBACK_SPEED
+	move_and_slide()
+
+
 func _try_start_task(delta: float, road_network: Node) -> void:
 	_task_replan_timer -= delta
 	if _task_replan_timer > 0.0:
@@ -243,6 +260,10 @@ func _try_start_task(delta: float, road_network: Node) -> void:
 	
 	if not road_network.call("is_in_network", current_cell):
 		_question_timer = QUESTION_SHOW_TIME
+		# 回退到漫游状态，而不是卡死
+		_task_state = TaskState.UNBOUND
+		_current_path.clear()
+		_path_index = 0
 		return
 	
 	# Find start and end building positions

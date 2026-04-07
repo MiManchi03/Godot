@@ -63,6 +63,18 @@ func remove_added_player(build_id: String, world_pos: Vector3, node_name: String
 	var coord := _world_to_chunk(world_pos)
 	var chunk_data := _load_chunk(coord)
 	var added := chunk_data.get("added", []) as Array
+	if build_id == "road":
+		var target_cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		for i in range(added.size() - 1, -1, -1):
+			var entry := added[i] as Dictionary
+			if str(entry.get("build_id", "")) != "road":
+				continue
+			var entry_pos := _entry_position(entry)
+			var entry_cell := Vector2i(roundi(entry_pos.x), roundi(entry_pos.z))
+			if entry_cell == target_cell:
+				added.remove_at(i)
+				_mark_chunk_dirty(chunk_data)
+				return true
 	for i in range(added.size() - 1, -1, -1):
 		var entry := added[i] as Dictionary
 		if str(entry.get("build_id", "")) != build_id:
@@ -92,6 +104,25 @@ func add_removed_original(build_id: String, world_pos: Vector3, node_name: Strin
 	var coord := _world_to_chunk(world_pos)
 	var chunk_data := _load_chunk(coord)
 	var removed := chunk_data.get("removed", []) as Array
+	if build_id == "road":
+		var road_cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		for entry_variant in removed:
+			var entry := entry_variant as Dictionary
+			if str(entry.get("build_id", "")) != "road":
+				continue
+			var entry_pos := _entry_position(entry)
+			var entry_cell := Vector2i(roundi(entry_pos.x), roundi(entry_pos.z))
+			if entry_cell == road_cell:
+				return
+		var rem_road := {
+			"build_id": "road",
+			"position": [float(road_cell.x), world_pos.y, float(road_cell.y)],
+			"name": node_name,
+			"entity_id": "road|%d|%d" % [road_cell.x, road_cell.y],
+		}
+		removed.append(rem_road)
+		_mark_chunk_dirty(chunk_data)
+		return
 
 	for entry_variant in removed:
 		var entry := entry_variant as Dictionary
@@ -246,6 +277,11 @@ func save_dirty(force: bool) -> void:
 
 
 func save_player_position(pos_data: Dictionary) -> void:
+	var pos_arr := pos_data.get("position", []) as Array
+	if pos_arr.size() >= 3:
+		var y := float(pos_arr[1])
+		if y < -20.0:
+			return  # 防止保存无效的Y位置
 	_player_position_cache = pos_data.duplicate(true)
 	_save_player_position_to_disk()
 
@@ -418,6 +454,10 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> bool:
 		var entry := entry_variant as Dictionary
 		var build_id := str(entry.get("build_id", ""))
 		var pos := _entry_position(entry)
+		if build_id == "road":
+			var road_cell := Vector2i(roundi(pos.x), roundi(pos.z))
+			entry["position"] = [float(road_cell.x), pos.y, float(road_cell.y)]
+			pos = _entry_position(entry)
 		var key := "%s|%.3f|%.3f" % [build_id, pos.x, pos.z]
 		if added_seen.has(key):
 			continue
@@ -432,6 +472,12 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> bool:
 	var removed_out: Array = []
 	for entry_variant in removed_in:
 		var entry := entry_variant as Dictionary
+		var rem_build_id := str(entry.get("build_id", ""))
+		if rem_build_id == "road":
+			var rem_pos := _entry_position(entry)
+			var rem_cell := Vector2i(roundi(rem_pos.x), roundi(rem_pos.z))
+			entry["position"] = [float(rem_cell.x), rem_pos.y, float(rem_cell.y)]
+			entry["entity_id"] = "road|%d|%d" % [rem_cell.x, rem_cell.y]
 		var entity_id := str(entry.get("entity_id", ""))
 		var key := entity_id
 		if key.is_empty():
@@ -475,6 +521,10 @@ func _normalize_chunk_data(chunk_data: Dictionary) -> bool:
 			continue
 		var pos := _entry_position(entry)
 		if pos == Vector3.ZERO:
+			changed = true
+			continue
+		# 防止保存无效Y位置（玩家/村民坠落问题）
+		if pos.y < -20.0:
 			changed = true
 			continue
 		var key := entity_id

@@ -28,6 +28,9 @@ func spawn_preview(parent: Node, build_id: String, build_type: int, generator: V
 	preview.name = "BuildPreview"
 	preview.set_meta("build_id", build_id)
 	preview.set_meta("variant_seed", rng_seed)
+	preview.set_meta("is_preview", true)
+	if build_id == "road":
+		preview.set_meta("force_road_visible", true)
 	parent.add_child(preview)
 	preview_root = preview
 	preview_rotation_deg = 0.0

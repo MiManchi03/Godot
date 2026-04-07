@@ -59,7 +59,8 @@ func is_in_network(cell: Vector2i) -> bool:
 	var cid := int(_component_id_by_cell.get(cell, -1))
 	if cid == -1:
 		return false
-	return int(_component_size.get(cid, 0)) > 1
+	# 放宽条件：只要有道路就算在网络中（允许单段路）
+	return int(_component_size.get(cid, 0)) >= 1
 
 
 func _has_path_to_any_connected(start: Vector2i) -> bool:
@@ -67,7 +68,8 @@ func _has_path_to_any_connected(start: Vector2i) -> bool:
 	var cid := int(_component_id_by_cell.get(start, -1))
 	if cid == -1:
 		return false
-	return int(_component_size.get(cid, 0)) > 1
+	# 放宽条件：只要有道路就算连通
+	return int(_component_size.get(cid, 0)) >= 1
 
 
 func _ensure_components() -> void:
@@ -191,3 +193,34 @@ func clear_all() -> void:
 
 func get_road_count() -> int:
 	return _road_cells.size()
+
+
+func get_connected_buildings(cell: Vector2i, world_manager: Node) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not _road_cells.has(cell):
+		return result
+	if not world_manager or not world_manager.has_method("get_buildings_at_cell"):
+		return result
+	
+	var directions: Array[Vector2i] = [
+		Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
+	]
+	
+	for dir in directions:
+		var neighbor := cell + dir
+		var buildings_raw = world_manager.call("get_buildings_at_cell", neighbor)
+		if not (buildings_raw is Array):
+			continue
+		var buildings: Array = buildings_raw as Array
+		for b in buildings:
+			var building := b as Node3D
+			if building == null:
+				continue
+			var build_id := str(building.get_meta("build_id", ""))
+			if build_id == "road":
+				continue
+			var path := find_path(cell, neighbor)
+			if not path.is_empty():
+				result.append({"building": building, "path": path, "build_id": build_id})
+	
+	return result

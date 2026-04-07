@@ -420,6 +420,13 @@ func _assign_entity_ids(root: Node3D, chunk_coord: Vector2i) -> void:
 			var build_id := str(n3d.get_meta("build_id", ""))
 			var destruct_type := str(n3d.get_meta("destruct_type", ""))
 			if not build_id.is_empty() or not destruct_type.is_empty():
+				if build_id == "road":
+					var road_cell := Vector2i(roundi(n3d.global_position.x), roundi(n3d.global_position.z))
+					var road_id := "road|%d|%d" % [road_cell.x, road_cell.y]
+					n3d.set_meta("entity_id", road_id)
+					for child in node.get_children():
+						queue.append(child)
+					continue
 				var key_type := build_id
 				if key_type.is_empty():
 					key_type = destruct_type
@@ -750,33 +757,32 @@ func _create_road_tile_variant(rng: RandomNumberGenerator) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Road"
 
+	# 道路专用碰撞层：仅用于建造模式拾取，不阻挡玩家移动
+	var body := StaticBody3D.new()
+	body.collision_layer = 4
+	body.collision_mask = 0
+	root.add_child(body)
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(1.0, 0.5, 1.0)
+	collision.shape = shape
+	collision.position = Vector3(0.0, 0.25, 0.0)
+	body.add_child(collision)
+	root.set_meta("road", true)
+	
+	# 视觉由GridMap处理；预览时可见，落地后由world_manager隐藏
 	var base := MeshInstance3D.new()
+	base.name = "RoadVisual"
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(1.0, 0.08, 1.0)
 	base.mesh = mesh
 	base.position = Vector3(0.0, 0.04, 0.0)
 	var tint := 0.52 + rng.randf_range(-0.04, 0.06)
 	base.material_override = _material(Color(tint, tint * 0.96, tint * 0.88))
+	base.visible = true
 	root.add_child(base)
 
-	var edge := MeshInstance3D.new()
-	var edge_mesh := BoxMesh.new()
-	edge_mesh.size = Vector3(0.94, 0.02, 0.94)
-	edge.mesh = edge_mesh
-	edge.position = Vector3(0.0, 0.09, 0.0)
-	edge.material_override = _material(Color(0.65, 0.63, 0.56))
-	root.add_child(edge)
-
-	var lane := MeshInstance3D.new()
-	var lane_mesh := BoxMesh.new()
-	lane_mesh.size = Vector3(0.28, 0.015, 0.86)
-	lane.mesh = lane_mesh
-	lane.position = Vector3(0.0, 0.1, 0.0)
-	lane.material_override = _material(Color(0.76, 0.72, 0.58))
-	root.add_child(lane)
-
-	_add_box_collision(root, Vector3(1.0, 0.12, 1.0), Vector3(0.0, 0.06, 0.0))
-	root.set_meta("road", true)
+	root.set_meta("use_grid_map_rendering", true)
 	return root
 
 
@@ -797,19 +803,27 @@ func _add_road_cell(village: Node3D, cell: Vector2i, road_cells: Dictionary, typ
 	_tag_building_identity(road, BuildingType.ROAD, type_counts)
 	road.position = _cell_to_v3(cell)
 	village.add_child(road)
+	# 统一到世界整数格，避免村庄浮点偏移导致道路操作错位
+	road.global_position = Vector3(
+		float(roundi(road.global_position.x)),
+		0.0,
+		float(roundi(road.global_position.z))
+	)
 	road_cells[cell] = true
-	
-	var road_network: Node = null
-	if village.get_tree() != null:
-		road_network = village.get_tree().get_first_node_in_group("road_network")
-	if road_network and road_network.has_method("add_road"):
-		var world_pos := village.global_position + _cell_to_v3(cell)
-		var world_cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
-		road_network.call("add_road", world_cell)
 
 
 func _register_village_roads(village: Node3D) -> void:
-	if village == null or village.get_tree() == null:
+	# 延迟注册，确保road_network节点已就绪
+	if village == null:
+		return
+	if not village.is_inside_tree():
+		village.tree_entered.connect(_do_register_village_roads.bind(village), CONNECT_ONE_SHOT)
+	else:
+		_do_register_village_roads(village)
+
+
+func _do_register_village_roads(village: Node3D) -> void:
+	if village.get_tree() == null:
 		return
 	var road_network := village.get_tree().get_first_node_in_group("road_network")
 	if road_network == null or not road_network.has_method("add_road"):

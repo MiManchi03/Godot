@@ -21,6 +21,7 @@ var biome_generator: BiomeGenerator
 var resource_spawner: ResourceSpawner
 var village_generator: VillageGenerator
 var world_state: WorldState
+var road_renderer: Node
 
 var player: CharacterBody3D
 var loaded_chunks: Dictionary = {}
@@ -30,6 +31,8 @@ var _building_position_cache: Dictionary = {}
 var _building_cache_dirty: bool = true
 var _pending_chunk_coords: Array[Vector2i] = []
 var _pending_chunk_set: Dictionary = {}
+var _road_node_index: Dictionary = {} # Dictionary[Vector2i, Node3D]
+var _road_state_dirty: bool = false
 
 
 func _ready() -> void:
@@ -43,6 +46,7 @@ func _ready() -> void:
 	resource_spawner = ResourceSpawner.new(world_seed + 1000)
 	village_generator = VillageGenerator.new(world_seed + 2000)
 	world_state = WorldState.new(world_seed, CHUNK_SIZE)
+	road_renderer = _create_road_renderer()
 
 	player = get_node_or_null("../Player")
 	if player == null:
@@ -68,6 +72,9 @@ func _process(_delta: float) -> void:
 	if world_state != null:
 		world_state.tick(_delta)
 	_update_chunks_around_player()
+	if _road_state_dirty:
+		_rebuild_road_state_from_loaded_chunks()
+		_road_state_dirty = false
 
 
 func _exit_tree() -> void:
@@ -161,15 +168,19 @@ func _create_chunk(coord: Vector2i) -> void:
 
 	resource_spawner.populate_chunk(chunk_root, coord, CHUNK_SIZE, biome)
 	village_generator.try_spawn_village(chunk_root, coord, CHUNK_SIZE, biome)
+	_set_chunk_road_visual_mode(chunk_root, false)
 	loaded_chunks[coord] = chunk_root
 	_building_cache_dirty = true
 	_apply_player_buildings_for_chunk(coord, chunk_root)
+	_register_chunk_roads_with_renderer(chunk_root)
+	_road_state_dirty = true
 
 
 func _remove_chunk(coord: Vector2i) -> void:
 	if not loaded_chunks.has(coord):
 		return
 	var chunk: Node3D = loaded_chunks[coord]
+	_unregister_chunk_roads(chunk)
 	_snapshot_chunk_villagers(chunk, false)
 	if world_state != null:
 		world_state.save_dirty(false)
@@ -178,6 +189,7 @@ func _remove_chunk(coord: Vector2i) -> void:
 	chunk.queue_free()
 	_building_cache_dirty = true
 	_pending_chunk_set.erase(coord)
+	_road_state_dirty = true
 
 
 func _build_ground_mesh(biome: BiomeGenerator.Biome) -> StaticBody3D:
@@ -234,6 +246,11 @@ func add_player_building(build_id: String, world_pos: Vector3, rotation_y: float
 
 
 func spawn_player_building(build_id: String, world_pos: Vector3, rotation_y: float, variant_seed: int, node_name: String = "") -> Node3D:
+	if build_id == "road":
+		var road_cell_check := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		var existing_road := get_road_node_at_cell(road_cell_check)
+		if existing_road != null:
+			return null
 	var building_type := _building_type_from_id(build_id)
 	if building_type == -1:
 		return null
@@ -248,7 +265,11 @@ func spawn_player_building(build_id: String, world_pos: Vector3, rotation_y: flo
 	instance.set_meta("build_id", build_id)
 	instance.set_meta("player_placed", true)
 	instance.set_meta("variant_seed", seed)
-	instance.set_meta("entity_id", "player|%s|%.3f|%.3f" % [build_id, world_pos.x, world_pos.z])
+	if build_id == "road":
+		var cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		instance.set_meta("entity_id", "road|%d|%d" % [cell.x, cell.y])
+	else:
+		instance.set_meta("entity_id", "player|%s|%.3f|%.3f" % [build_id, world_pos.x, world_pos.z])
 	if build_id == "road":
 		instance.set_meta("destruct_type", "road")
 	else:
@@ -262,6 +283,9 @@ func spawn_player_building(build_id: String, world_pos: Vector3, rotation_y: flo
 		add_child(instance)
 	instance.global_position = world_pos
 	instance.rotation.y = rotation_y
+	if build_id == "road":
+		_register_road_node(instance)
+		_set_road_visual_mode(instance, false)
 	_building_cache_dirty = true
 	_update_road_network_on_building_added(build_id, world_pos)
 	return instance
@@ -785,7 +809,7 @@ func _apply_removed_originals(chunk_root: Node3D, removed: Array) -> void:
 		var rem_pos := _entry_position(rem)
 		var radius := 1.8
 		if rem_id == "road":
-			radius = 0.45
+			radius = 0.2
 		var target := _find_matching_original(chunk_root, rem_id, rem_pos, radius, rem_name, rem_entity_id)
 		if target != null:
 			_update_road_network_on_building_removed(rem_id, target.global_position)
@@ -795,6 +819,16 @@ func _apply_removed_originals(chunk_root: Node3D, removed: Array) -> void:
 func _find_matching_original(root: Node, build_id: String, world_pos: Vector3, radius: float, node_name: String, entity_id: String) -> Node3D:
 	var candidates: Array[Node3D] = []
 	_collect_building_candidates(root, candidates)
+	if build_id == "road":
+		var target_cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+		for c in candidates:
+			if bool(c.get_meta("player_placed", false)):
+				continue
+			if _resolve_build_id(c) != "road":
+				continue
+			var c_cell := Vector2i(roundi(c.global_position.x), roundi(c.global_position.z))
+			if c_cell == target_cell:
+				return c
 	if not entity_id.is_empty():
 		for c in candidates:
 			if bool(c.get_meta("player_placed", false)):
@@ -850,30 +884,35 @@ func _resolve_build_id(node3d: Node3D) -> String:
 
 
 func _build_id_from_node_name(node_name: String) -> String:
-	var lower := node_name.to_lower()
-	if lower.find("warehouse") != -1:
-		return "warehouse"
-	if lower.find("house") != -1:
-		return "house"
-	if lower.find("workshop") != -1:
-		return "workshop"
-	if lower.find("market") != -1:
-		return "market"
-	if lower.find("well") != -1:
-		return "well"
-	if lower.find("campfire") != -1:
-		return "campfire"
-	if lower.find("fencepost") != -1 or lower.find("fence_post") != -1 or lower.find("fence") != -1:
-		return "fencepost"
-	if lower.find("road") != -1:
-		return "road"
-	if lower.find("farm") != -1:
-		return "farm"
-	if lower.find("tower") != -1:
-		return "tower"
-	if lower.find("barrack") != -1:
-		return "barrack"
-	return ""
+	var base := node_name
+	var us_idx := base.find("_")
+	if us_idx > 0:
+		base = base.substr(0, us_idx)
+	match base:
+		"House":
+			return "house"
+		"Workshop":
+			return "workshop"
+		"Warehouse":
+			return "warehouse"
+		"Market":
+			return "market"
+		"Well":
+			return "well"
+		"Campfire":
+			return "campfire"
+		"FencePost", "Fence_Post":
+			return "fencepost"
+		"Road":
+			return "road"
+		"Farm", "FarmPlot":
+			return "farm"
+		"Tower":
+			return "tower"
+		"Barrack", "Barracks":
+			return "barrack"
+		_:
+			return ""
 
 
 func _building_type_from_id(build_id: String) -> int:
@@ -963,6 +1002,10 @@ func _update_road_network_on_building_added(build_id: String, world_pos: Vector3
 		road_network = get_tree().get_first_node_in_group("road_network")
 	if road_network and road_network.has_method("add_road"):
 		road_network.call("add_road", cell)
+	
+	if road_renderer and road_renderer.has_method("set_road_cell"):
+		road_renderer.call("set_road_cell", cell, 0)
+	_road_state_dirty = true
 
 
 func _update_road_network_on_building_removed(build_id: String, world_pos: Vector3) -> void:
@@ -970,8 +1013,259 @@ func _update_road_network_on_building_removed(build_id: String, world_pos: Vecto
 		return
 	
 	var cell := Vector2i(roundi(world_pos.x), roundi(world_pos.z))
+	_unregister_road_cell(cell)
 	var road_network: Node = null
 	if get_tree() != null:
 		road_network = get_tree().get_first_node_in_group("road_network")
 	if road_network and road_network.has_method("remove_road"):
 		road_network.call("remove_road", cell)
+	
+	if road_renderer and road_renderer.has_method("remove_road_cell"):
+		road_renderer.call("remove_road_cell", cell)
+	_road_state_dirty = true
+
+
+func _create_road_renderer() -> Node:
+	var renderer := Node.new()
+	renderer.name = "RoadRenderer"
+	var script := load("res://scripts/world/road_renderer.gd")
+	if script:
+		renderer.set_script(script)
+	add_child(renderer)
+	return renderer
+
+
+func _register_chunk_roads_with_renderer(chunk_root: Node3D) -> void:
+	if road_renderer == null or not road_renderer.has_method("set_road_cell"):
+		return
+	var stack: Array[Node] = [chunk_root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		if node is Node3D:
+			var node3d := node as Node3D
+			if bool(node3d.get_meta("road", false)) or str(node3d.get_meta("build_id", "")) == "road":
+				if bool(node3d.get_meta("pending_delete", false)) or bool(node3d.get_meta("picked_hidden", false)):
+					for child in node.get_children():
+						stack.append(child)
+					continue
+				_register_road_node(node3d)
+				_set_road_visual_mode(node3d, false)
+				var cell := Vector2i(roundi(node3d.global_position.x), roundi(node3d.global_position.z))
+				road_renderer.call("set_road_cell", cell, 0)
+		for child in node.get_children():
+			stack.append(child)
+
+
+func _rebuild_road_state_from_loaded_chunks() -> void:
+	_road_node_index.clear()
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_method("clear_all"):
+		road_network.call("clear_all")
+	if road_renderer and road_renderer.has_method("clear_all_cells"):
+		road_renderer.call("clear_all_cells")
+
+	var seen_cells: Dictionary = {}
+	for chunk_coord in loaded_chunks.keys():
+		var chunk: Node3D = loaded_chunks[chunk_coord]
+		if chunk == null:
+			continue
+		var stack: Array[Node] = [chunk]
+		while not stack.is_empty():
+			var node := stack.pop_back() as Node
+			if node is Node3D:
+				var n3d := node as Node3D
+				if bool(n3d.get_meta("road", false)) or str(n3d.get_meta("build_id", "")) == "road":
+					if bool(n3d.get_meta("pending_delete", false)) or bool(n3d.get_meta("picked_hidden", false)):
+						for child in node.get_children():
+							stack.append(child)
+						continue
+					var cell := Vector2i(roundi(n3d.global_position.x), roundi(n3d.global_position.z))
+					if seen_cells.has(cell):
+						n3d.set_meta("pending_delete", true)
+						n3d.queue_free()
+						for child in node.get_children():
+							stack.append(child)
+						continue
+					seen_cells[cell] = true
+					_register_road_node(n3d)
+					_set_road_visual_mode(n3d, false)
+					if road_network and road_network.has_method("add_road"):
+						road_network.call("add_road", cell)
+					if road_renderer and road_renderer.has_method("set_road_cell"):
+						road_renderer.call("set_road_cell", cell, 0)
+			for child in node.get_children():
+				stack.append(child)
+
+
+func _register_road_node(road_node: Node3D) -> void:
+	if road_node == null:
+		return
+	var cell := Vector2i(roundi(road_node.global_position.x), roundi(road_node.global_position.z))
+	# 强制道路节点对齐到整数格，确保渲染/拾取/删除同一坐标系
+	road_node.global_position = Vector3(float(cell.x), 0.0, float(cell.y))
+	if str(road_node.get_meta("build_id", "")) == "road" or bool(road_node.get_meta("road", false)):
+		road_node.set_meta("entity_id", "road|%d|%d" % [cell.x, cell.y])
+	_road_node_index[cell] = road_node
+
+
+func _unregister_road_cell(cell: Vector2i) -> void:
+	_road_node_index.erase(cell)
+
+
+func _unregister_chunk_roads(chunk_root: Node3D) -> void:
+	var stack: Array[Node] = [chunk_root]
+	while not stack.is_empty():
+		var node := stack.pop_back() as Node
+		if node is Node3D:
+			var n3d := node as Node3D
+			if bool(n3d.get_meta("road", false)) or str(n3d.get_meta("build_id", "")) == "road":
+				var cell := Vector2i(roundi(n3d.global_position.x), roundi(n3d.global_position.z))
+				var road_network: Node = null
+				if get_tree() != null:
+					road_network = get_tree().get_first_node_in_group("road_network")
+				if road_network and road_network.has_method("remove_road"):
+					road_network.call("remove_road", cell)
+				if road_renderer and road_renderer.has_method("remove_road_cell"):
+					road_renderer.call("remove_road_cell", cell)
+				_unregister_road_cell(cell)
+		for child in node.get_children():
+			stack.append(child)
+
+
+func _set_chunk_road_visual_mode(chunk_root: Node3D, visible: bool) -> void:
+	var stack: Array[Node] = [chunk_root]
+	while not stack.is_empty():
+		var node := stack.pop_back() as Node
+		if node is Node3D:
+			var n3d := node as Node3D
+			if bool(n3d.get_meta("road", false)) or str(n3d.get_meta("build_id", "")) == "road":
+				_set_road_visual_mode(n3d, visible)
+		for child in node.get_children():
+			stack.append(child)
+
+
+func _set_road_visual_mode(road_node: Node3D, visible: bool) -> void:
+	if road_node == null:
+		return
+	for child in road_node.get_children():
+		if child is MeshInstance3D:
+			(child as MeshInstance3D).visible = visible
+
+
+func highlight_road_cells(cells: Array, item_type: int = 1) -> void:
+	if road_renderer and road_renderer.has_method("highlight_cells"):
+		var typed_cells: Array[Vector2i] = []
+		for c in cells:
+			typed_cells.append(c as Vector2i)
+		road_renderer.call("highlight_cells", typed_cells, item_type)
+
+
+func get_road_node_at_cell(cell: Vector2i) -> Node3D:
+	var raw = _road_node_index.get(cell, null)
+	if raw == null:
+		_road_node_index.erase(cell)
+		return null
+	if not is_instance_valid(raw):
+		_road_node_index.erase(cell)
+		return null
+	if raw is Node3D:
+		var n := raw as Node3D
+		if bool(n.get_meta("pending_delete", false)) or bool(n.get_meta("picked_hidden", false)):
+			_road_node_index.erase(cell)
+			return null
+		return n
+	# 索引丢失时回退扫描并自愈
+	for chunk_coord in loaded_chunks.keys():
+		var chunk: Node3D = loaded_chunks[chunk_coord]
+		if chunk == null:
+			continue
+		var stack: Array[Node] = [chunk]
+		while not stack.is_empty():
+			var node := stack.pop_back() as Node
+			if node is Node3D:
+				var n3d := node as Node3D
+				if bool(n3d.get_meta("road", false)) or str(n3d.get_meta("build_id", "")) == "road":
+					if bool(n3d.get_meta("pending_delete", false)) or bool(n3d.get_meta("picked_hidden", false)):
+						for child in node.get_children():
+							stack.append(child)
+						continue
+					var ncell := Vector2i(roundi(n3d.global_position.x), roundi(n3d.global_position.z))
+					if ncell == cell:
+						_register_road_node(n3d)
+						return n3d
+			for child in node.get_children():
+				stack.append(child)
+	_road_node_index.erase(cell)
+	return null
+
+
+func begin_pickup_road(cell: Vector2i) -> void:
+	_unregister_road_cell(cell)
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_method("remove_road"):
+		road_network.call("remove_road", cell)
+	if road_renderer and road_renderer.has_method("remove_road_cell"):
+		road_renderer.call("remove_road_cell", cell)
+
+
+func cancel_pickup_road(road_node: Node3D) -> void:
+	if road_node == null or not is_instance_valid(road_node):
+		return
+	_register_road_node(road_node)
+	var cell := Vector2i(roundi(road_node.global_position.x), roundi(road_node.global_position.z))
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_method("add_road"):
+		road_network.call("add_road", cell)
+	if road_renderer and road_renderer.has_method("set_road_cell"):
+		road_renderer.call("set_road_cell", cell, 0)
+
+
+func set_road_cell_visible(cell: Vector2i, visible: bool) -> void:
+	if road_renderer == null:
+		return
+	if visible:
+		if road_renderer.has_method("set_road_cell"):
+			road_renderer.call("set_road_cell", cell, 0)
+	else:
+		if road_renderer.has_method("remove_road_cell"):
+			road_renderer.call("remove_road_cell", cell)
+
+
+func has_road_cell(cell: Vector2i) -> bool:
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_method("has_road_at"):
+		return bool(road_network.call("has_road_at", cell))
+	return false
+
+
+func reconcile_road_state() -> void:
+	_rebuild_road_state_from_loaded_chunks()
+
+
+func get_buildings_at_cell(cell: Vector2i) -> Array[Node3D]:
+	var result: Array[Node3D] = []
+	for chunk_coord in loaded_chunks.keys():
+		var chunk: Node3D = loaded_chunks[chunk_coord]
+		if chunk == null:
+			continue
+		var stack: Array[Node] = [chunk]
+		while not stack.is_empty():
+			var node: Node = stack.pop_back()
+			if node is Node3D and node != chunk:
+				var node3d := node as Node3D
+				var build_id := str(node3d.get_meta("build_id", ""))
+				if not build_id.is_empty() and build_id != "road":
+					var node_cell := Vector2i(roundi(node3d.global_position.x), roundi(node3d.global_position.z))
+					if node_cell == cell:
+						result.append(node3d)
+			for child in node.get_children():
+				stack.append(child)
+	return result
