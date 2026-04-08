@@ -76,6 +76,19 @@ const BUILD_DRAG_MAX_MOUSE_DELTA: float = 64.0
 const BUILD_PICK_DOUBLE_CLICK_MS: int = 380
 const BUILD_PICK_DOUBLE_CLICK_DIST: float = 22.0
 const BUILD_PICK_DEBUG: bool = false
+const BUILD_ROAD_MAX_CELLS_PER_FRAME: int = 32
+
+enum RoadBatchMode {
+	NONE,
+	PLACE_WAIT_END,
+	DELETE_WAIT_END,
+}
+
+enum DeleteIntent {
+	NONE,
+	PICKED_BUILDING,
+	ROAD_BATCH,
+}
 
 var _destroy_ui_layer: CanvasLayer
 var _destroy_ui_panel: PanelContainer
@@ -116,6 +129,18 @@ var _build_rng := RandomNumberGenerator.new()
 var _build_road_painting: bool = false
 var _build_road_painted_cells: Dictionary = {}
 var _build_road_painted_any: bool = false
+var _build_road_has_last_cell: bool = false
+var _build_road_last_cell: Vector2i = Vector2i.ZERO
+var _build_road_pending_cells: Array[Vector2i] = []
+var _road_batch_mode: int = RoadBatchMode.NONE
+var _road_batch_start_cell: Vector2i = Vector2i.ZERO
+var _road_pending_delete_cells: Dictionary = {}
+var _road_delete_confirm_pending: bool = false
+var _build_delete_overlay: ColorRect
+var _build_delete_trash_label: Label
+var _road_preview_place_cells: Array[Vector2i] = []
+var _road_preview_delete_cells: Array[Vector2i] = []
+var _delete_intent: int = DeleteIntent.NONE
 var _build_rotating_target: Node3D
 var _build_rotating_original_y: float = 0.0
 var _build_rotating_dragging: bool = false
@@ -251,6 +276,39 @@ func _setup_build_mode_ui() -> void:
 		_build_buttons_by_id[str(data["id"])] = btn
 		list_hbox.add_child(btn)
 	_refresh_build_button_highlight()
+
+	_build_delete_overlay = ColorRect.new()
+	_build_delete_overlay.name = "DeleteOverlay"
+	_build_delete_overlay.anchor_left = 0.0
+	_build_delete_overlay.anchor_top = 0.0
+	_build_delete_overlay.anchor_right = 1.0
+	_build_delete_overlay.anchor_bottom = 1.0
+	_build_delete_overlay.offset_left = 0.0
+	_build_delete_overlay.offset_top = 0.0
+	_build_delete_overlay.offset_right = 0.0
+	_build_delete_overlay.offset_bottom = 0.0
+	_build_delete_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_build_delete_overlay.color = Color(0.85, 0.08, 0.08, 0.72)
+	_build_delete_overlay.visible = false
+	_build_delete_overlay.gui_input.connect(_on_delete_overlay_input)
+	bottom_panel.add_child(_build_delete_overlay)
+
+	_build_delete_trash_label = Label.new()
+	_build_delete_trash_label.anchor_left = 0.5
+	_build_delete_trash_label.anchor_top = 0.5
+	_build_delete_trash_label.anchor_right = 0.5
+	_build_delete_trash_label.anchor_bottom = 0.5
+	_build_delete_trash_label.offset_left = -140
+	_build_delete_trash_label.offset_top = -24
+	_build_delete_trash_label.offset_right = 140
+	_build_delete_trash_label.offset_bottom = 24
+	_build_delete_trash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_build_delete_trash_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_build_delete_trash_label.add_theme_font_size_override("font_size", 22)
+	_build_delete_trash_label.text = "🗑 删除确认"
+	_build_delete_trash_label.modulate = Color(1.0, 0.9, 0.9, 0.96)
+	_build_delete_trash_label.visible = false
+	bottom_panel.add_child(_build_delete_trash_label)
 
 	var right_panel := PanelContainer.new()
 	right_panel.anchor_left = 1.0
@@ -729,6 +787,8 @@ func _exit_build_mode() -> void:
 	_build_road_painting = false
 	_build_road_painted_cells.clear()
 	_build_road_painted_any = false
+	_build_road_has_last_cell = false
+	_build_road_pending_cells.clear()
 	_cancel_rotate_selection(false)
 	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager:
@@ -784,6 +844,12 @@ func _update_build_mode(delta: float) -> void:
 		_apply_build_camera_rotation()
 
 	_update_build_preview()
+	if _road_delete_confirm_pending:
+		_refresh_pending_delete_visual()
+	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END or _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
+		var ground := _mouse_ground_position()
+		if ground != Vector3.ZERO:
+			_update_road_point_preview(_grid_cell_from_world(ground))
 	_update_rotate_handles()
 	
 	if _holding_villager != null:
@@ -792,8 +858,21 @@ func _update_build_mode(delta: float) -> void:
 
 func _handle_build_mode_input(event: InputEvent) -> void:
 	var over_build_ui := _is_mouse_over_build_ui()
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed and key_event.keycode == KEY_ESCAPE:
+			_cancel_delete_confirmation_state()
+			return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and _delete_intent != DeleteIntent.NONE and _is_point_in_build_list_area(mouse_event.position):
+			_confirm_delete_intent()
+			get_viewport().set_input_as_handled()
+			return
+		if mouse_event.pressed and not over_build_ui and (mouse_event.button_index == MOUSE_BUTTON_LEFT or mouse_event.button_index == MOUSE_BUTTON_RIGHT):
+			if _delete_intent != DeleteIntent.NONE:
+				_cancel_delete_confirmation_state()
+				return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
 			_build_rotating_dragging = false
 		if mouse_event.button_index == MOUSE_BUTTON_RIGHT and not mouse_event.pressed:
@@ -803,15 +882,17 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 				return
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
-			_build_road_painting = false
-			_build_road_painted_cells.clear()
 			if _build_selected_id == "road" and _build_road_painted_any:
 				_cancel_build_selection()
 				_build_road_painted_any = false
 			return
 		if mouse_event.button_index == MOUSE_BUTTON_RIGHT:
-			_build_drag_map = mouse_event.pressed and not over_build_ui
+			_build_drag_map = mouse_event.pressed and not over_build_ui and Input.is_key_pressed(KEY_CTRL)
 			_build_last_mouse = mouse_event.position
+			if _build_drag_map:
+				return
+			if mouse_event.pressed and not over_build_ui:
+				_handle_road_right_click()
 			return
 
 		if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
@@ -859,13 +940,7 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			if _build_selected_id.is_empty():
 				if _handle_rotate_click(mouse_event.position):
 					return
-			if _build_selected_id == "road":
-				_build_road_painting = true
-				_build_road_painted_cells.clear()
-				_build_road_painted_any = false
 			_try_place_building()
-			if _build_selected_id == "road" and _build_preview and _build_preview.preview_root:
-				_build_road_painted_cells[_grid_cell_from_world(_build_preview.preview_root.global_position)] = true
 			return
 
 	if event is InputEventMouseMotion:
@@ -881,11 +956,280 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			var drag_delta := motion.relative.limit_length(BUILD_DRAG_MAX_MOUSE_DELTA)
 			_build_camera_pan.x -= drag_delta.x * _build_drag_pan_factor
 			_build_camera_pan.z += drag_delta.y * _build_drag_pan_factor
-		if _build_road_painting and _build_selected_id == "road":
-			var cell := _grid_cell_from_world(_mouse_ground_position())
-			if not _build_road_painted_cells.has(cell):
-				if _try_place_building_at(_grid_pos_from_cell(cell)):
-					_build_road_painted_cells[cell] = true
+		if not _build_drag_map and (_road_batch_mode == RoadBatchMode.PLACE_WAIT_END or _road_batch_mode == RoadBatchMode.DELETE_WAIT_END):
+			var ground := _mouse_ground_position()
+			if ground != Vector3.ZERO:
+				_update_road_point_preview(_grid_cell_from_world(ground))
+
+
+func _update_road_painting_step() -> void:
+	if not _build_road_painting or _build_selected_id != "road":
+		return
+	var mouse_world := _mouse_ground_position()
+	if mouse_world == Vector3.ZERO:
+		return
+	var current_cell := _grid_cell_from_world(mouse_world)
+	if not _build_road_has_last_cell:
+		_build_road_last_cell = current_cell
+		_build_road_has_last_cell = true
+	
+	if _build_road_pending_cells.is_empty():
+		_build_road_pending_cells = _cells_between_4_connected(_build_road_last_cell, current_cell)
+		_build_road_last_cell = current_cell
+	
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	var budget := BUILD_ROAD_MAX_CELLS_PER_FRAME
+	while budget > 0 and not _build_road_pending_cells.is_empty():
+		var cell := _build_road_pending_cells.pop_front() as Vector2i
+		budget -= 1
+		if _build_road_painted_cells.has(cell):
+			continue
+		if world_manager and world_manager.has_method("has_road_cell"):
+			if bool(world_manager.call("has_road_cell", cell)):
+				_build_road_painted_cells[cell] = true
+				continue
+		if _try_place_building_at(_grid_pos_from_cell(cell)):
+			_build_road_painted_cells[cell] = true
+
+
+func _cells_between_4_connected(from_cell: Vector2i, to_cell: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	if from_cell == to_cell:
+		out.append(to_cell)
+		return out
+	var x := from_cell.x
+	var z := from_cell.y
+	var dx := to_cell.x - from_cell.x
+	var dz := to_cell.y - from_cell.y
+	var sx := 1 if dx >= 0 else -1
+	var sz := 1 if dz >= 0 else -1
+	var adx := absi(dx)
+	var adz := absi(dz)
+	out.append(Vector2i(x, z))
+	if adx >= adz:
+		var err := adx / 2
+		while x != to_cell.x:
+			x += sx
+			err -= adz
+			if err < 0:
+				z += sz
+				err += adx
+				out.append(Vector2i(x, z - sz))
+			out.append(Vector2i(x, z))
+	else:
+		var err2 := adz / 2
+		while z != to_cell.y:
+			z += sz
+			err2 -= adx
+			if err2 < 0:
+				x += sx
+				err2 += adz
+				out.append(Vector2i(x - sx, z))
+			out.append(Vector2i(x, z))
+	return out
+
+
+func _handle_road_right_click() -> void:
+	# 右键两点操作：起点在道路上=>删路；否则若道路可用=>铺路
+	if _road_delete_confirm_pending:
+		_cancel_road_delete_confirm_state()
+		return
+	var ground_pos := _mouse_ground_position()
+	if ground_pos == Vector3.ZERO:
+		return
+	var cell := _grid_cell_from_world(ground_pos)
+	var has_road := _cell_has_deletable_road(cell)
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if not has_road and world_manager != null and world_manager.has_method("has_road_cell"):
+		has_road = bool(world_manager.call("has_road_cell", cell))
+
+	if _road_batch_mode == RoadBatchMode.NONE:
+		_clear_road_point_preview()
+		if has_road:
+			_road_batch_start_cell = cell
+			_road_batch_mode = RoadBatchMode.DELETE_WAIT_END
+			return
+		var can_place := (_build_selected_id == "road") or (_build_picked_original != null and _build_picked_original_build_id == "road")
+		if not can_place:
+			return
+		_road_batch_start_cell = cell
+		_road_batch_mode = RoadBatchMode.PLACE_WAIT_END
+		return
+
+	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END:
+		var path_cells := _compute_quick_place_path(_road_batch_start_cell, cell)
+		if not path_cells.is_empty():
+			_apply_quick_place_path(path_cells)
+		_road_batch_mode = RoadBatchMode.NONE
+		_clear_road_point_preview()
+		return
+
+	if _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
+		if not has_road:
+			_road_batch_mode = RoadBatchMode.NONE
+			_clear_road_point_preview()
+			return
+		var delete_cells := _compute_quick_delete_cells(_road_batch_start_cell, cell)
+		_road_pending_delete_cells.clear()
+		for c in delete_cells:
+			_road_pending_delete_cells[c] = true
+		_road_delete_confirm_pending = not _road_pending_delete_cells.is_empty()
+		_delete_intent = DeleteIntent.ROAD_BATCH if _road_delete_confirm_pending else DeleteIntent.NONE
+		_refresh_pending_delete_visual()
+		_road_batch_mode = RoadBatchMode.NONE
+		_update_delete_hint_visibility()
+
+
+func _compute_quick_place_path(start_cell: Vector2i, end_cell: Vector2i) -> Array[Vector2i]:
+	if start_cell == end_cell:
+		return [start_cell]
+	if start_cell.x == end_cell.x or start_cell.y == end_cell.y:
+		return _cells_between_4_connected(start_cell, end_cell)
+	return _a_star_road_preferred(start_cell, end_cell)
+
+
+func _a_star_road_preferred(start_cell: Vector2i, end_cell: Vector2i) -> Array[Vector2i]:
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager == null or not world_manager.has_method("has_road_cell"):
+		return _cells_between_4_connected(start_cell, end_cell)
+	var margin := 16
+	var min_x := mini(start_cell.x, end_cell.x) - margin
+	var max_x := maxi(start_cell.x, end_cell.x) + margin
+	var min_z := mini(start_cell.y, end_cell.y) - margin
+	var max_z := maxi(start_cell.y, end_cell.y) + margin
+
+	var open: Array[Vector2i] = [start_cell]
+	var came_from: Dictionary = {}
+	var g_score: Dictionary = {start_cell: 0.0}
+	var f_score: Dictionary = {start_cell: float(_manhattan(start_cell, end_cell))}
+
+	while not open.is_empty():
+		var best_idx := 0
+		var best_f := float(f_score.get(open[0], 1e20))
+		for i in range(1, open.size()):
+			var f := float(f_score.get(open[i], 1e20))
+			if f < best_f:
+				best_f = f
+				best_idx = i
+		var current: Vector2i = open[best_idx]
+		open.remove_at(best_idx)
+		if current == end_cell:
+			return _reconstruct_path(came_from, current)
+
+		var neighbors: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		for dir in neighbors:
+			var nb: Vector2i = current + dir
+			if nb.x < min_x or nb.x > max_x or nb.y < min_z or nb.y > max_z:
+				continue
+			var move_cost := 1.0
+			if bool(world_manager.call("has_road_cell", nb)):
+				move_cost = 0.7
+			var tentative_g := float(g_score.get(current, 1e20)) + move_cost
+			if tentative_g < float(g_score.get(nb, 1e20)):
+				came_from[nb] = current
+				g_score[nb] = tentative_g
+				f_score[nb] = tentative_g + float(_manhattan(nb, end_cell))
+				if not open.has(nb):
+					open.append(nb)
+
+	return _cells_between_4_connected(start_cell, end_cell)
+
+
+func _reconstruct_path(came_from: Dictionary, current: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = [current]
+	var c := current
+	while came_from.has(c):
+		c = came_from[c] as Vector2i
+		out.append(c)
+	out.reverse()
+	return out
+
+
+func _manhattan(a: Vector2i, b: Vector2i) -> int:
+	return absi(a.x - b.x) + absi(a.y - b.y)
+
+
+func _apply_quick_place_path(path_cells: Array[Vector2i]) -> void:
+	for c in path_cells:
+		var wm := get_node_or_null("/root/World/WorldManager")
+		if wm and wm.has_method("has_road_cell") and bool(wm.call("has_road_cell", c)):
+			continue
+		if _try_place_building_at(_grid_pos_from_cell(c)):
+			_build_mode_has_changes = true
+
+
+func _compute_quick_delete_cells(start_cell: Vector2i, end_cell: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	# 删路预览按几何区域计算：共线=线段；非共线=矩形区域
+	if start_cell.x == end_cell.x or start_cell.y == end_cell.y:
+		var line_cells := _cells_between_4_connected(start_cell, end_cell)
+		for c in line_cells:
+			if _cell_has_deletable_road(c):
+				out.append(c)
+		return out
+
+	var min_x := mini(start_cell.x, end_cell.x)
+	var max_x := maxi(start_cell.x, end_cell.x)
+	var min_z := mini(start_cell.y, end_cell.y)
+	var max_z := maxi(start_cell.y, end_cell.y)
+	for x in range(min_x, max_x + 1):
+		for z in range(min_z, max_z + 1):
+			var c := Vector2i(x, z)
+			if _cell_has_deletable_road(c):
+				out.append(c)
+	return out
+
+
+func _cell_has_deletable_road(cell: Vector2i) -> bool:
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null:
+		return false
+	# 优先用节点索引判断（最可靠）
+	if wm.has_method("get_road_node_at_cell"):
+		var node_variant = wm.call("get_road_node_at_cell", cell)
+		var road_node := node_variant as Node3D
+		if road_node != null and is_instance_valid(road_node):
+			return true
+	# 其次用路网判断
+	if wm.has_method("has_road_cell"):
+		var has_network_road := bool(wm.call("has_road_cell", cell))
+		if has_network_road:
+			# 路网有但索引无，尝试一次自愈再判定
+			if wm.has_method("reconcile_road_state"):
+				wm.call("reconcile_road_state")
+			if wm.has_method("get_road_node_at_cell"):
+				var node_variant2 = wm.call("get_road_node_at_cell", cell)
+				var road_node2: Node3D = node_variant2 as Node3D
+				if road_node2 != null and is_instance_valid(road_node2):
+					return true
+	return false
+
+
+func _confirm_pending_road_delete() -> void:
+	if not _road_delete_confirm_pending:
+		return
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("get_road_node_at_cell"):
+		_cancel_road_delete_confirm_state()
+		return
+	for cell in _road_pending_delete_cells.keys():
+		var c := cell as Vector2i
+		var node_variant = wm.call("get_road_node_at_cell", c)
+		var road_node := node_variant as Node3D
+		if road_node == null or not is_instance_valid(road_node):
+			continue
+		road_node.set_meta("pending_delete", true)
+		wm.call(
+			"on_pick_existing_building",
+			"road",
+			road_node.global_position,
+			road_node.name,
+			bool(road_node.get_meta("player_placed", false)),
+			str(road_node.get_meta("entity_id", ""))
+		)
+		road_node.queue_free()
+	_build_mode_has_changes = true
+	_cancel_road_delete_confirm_state()
 
 
 func _apply_build_camera_rotation() -> void:
@@ -939,6 +1283,8 @@ func _stash_picked_original(target: Node3D, build_id: String, pos: Vector3, rot_
 		if world_manager and world_manager.has_method("begin_pickup_road"):
 			var cell := Vector2i(roundi(pos.x), roundi(pos.z))
 			world_manager.call("begin_pickup_road", cell)
+	_delete_intent = DeleteIntent.PICKED_BUILDING
+	_update_delete_hint_visibility()
 
 
 func _finalize_picked_original() -> void:
@@ -962,6 +1308,7 @@ func _finalize_picked_original() -> void:
 		_build_picked_original.set_meta("picked_hidden", false)
 	_build_picked_original.queue_free()
 	_clear_picked_original()
+	_update_delete_hint_visibility()
 
 
 func _restore_picked_original() -> void:
@@ -980,6 +1327,7 @@ func _restore_picked_original() -> void:
 			world_manager.call("cancel_pickup_road", _build_picked_original)
 	_build_picked_original.visible = true
 	_clear_picked_original()
+	_update_delete_hint_visibility()
 
 
 func _clear_picked_original() -> void:
@@ -991,6 +1339,9 @@ func _clear_picked_original() -> void:
 	_build_picked_original_was_player_placed = false
 	_build_picked_original_entity_id = ""
 	_build_picked_original_collision.clear()
+	if _delete_intent == DeleteIntent.PICKED_BUILDING:
+		_delete_intent = DeleteIntent.NONE
+	_update_delete_hint_visibility()
 
 
 func _set_building_collision_enabled(node: Node, enabled: bool) -> void:
@@ -1309,6 +1660,14 @@ func _on_building_button_input(event: InputEvent, build_id: String) -> void:
 	var mouse_event := event as InputEventMouseButton
 	if mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
 		return
+	# 先检查道路删除确认状态，再检查其他删除意图
+	if build_id == "road" and _road_delete_confirm_pending:
+		_confirm_pending_road_delete()
+		return
+	if _road_delete_confirm_pending:
+		_cancel_road_delete_confirm_state()
+	if _delete_intent != DeleteIntent.NONE:
+		return
 	if mouse_event.double_click:
 		_select_building(build_id)
 		return
@@ -1336,17 +1695,145 @@ func _cancel_build_selection() -> void:
 	_build_road_painting = false
 	_build_road_painted_cells.clear()
 	_build_road_painted_any = false
+	_build_road_has_last_cell = false
+	_build_road_pending_cells.clear()
+	_road_batch_mode = RoadBatchMode.NONE
+	_road_pending_delete_cells.clear()
+	_road_delete_confirm_pending = false
+	_delete_intent = DeleteIntent.NONE
+	_clear_road_point_preview()
 	_restore_picked_original()
 	_cancel_rotate_selection(false)
+	_update_delete_hint_visibility()
 	_refresh_build_button_highlight()
 
 
+func _update_delete_hint_visibility() -> void:
+	var active := _delete_intent != DeleteIntent.NONE
+	if _build_delete_overlay:
+		_build_delete_overlay.visible = active
+	if _build_delete_trash_label:
+		_build_delete_trash_label.visible = active
+	if active:
+		for id_key in _build_buttons_by_id.keys():
+			var btn: Button = _build_buttons_by_id[id_key] as Button
+			if btn:
+				btn.modulate = Color(1, 0.3, 0.3, 0.8)  # 设置为红色，提示删除操作
+	else:
+		for id_key in _build_buttons_by_id.keys():
+			var btn2: Button = _build_buttons_by_id[id_key] as Button
+			if btn2:
+				btn2.modulate = Color(1, 1, 1, 1)
+	_refresh_build_button_highlight()
+
+
+func _is_point_in_build_list_area(screen_pos: Vector2) -> bool:
+	if _build_ui_root == null or not _build_ui_root.visible:
+		return false
+	if _build_list_scroll == null:
+		return false
+	var rect := _build_list_scroll.get_global_rect()
+	return rect.has_point(screen_pos)
+
+
+func _clear_road_point_preview() -> void:
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm and wm.has_method("highlight_road_cells"):
+		if not _road_preview_place_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_place_cells, 0, 0.01)
+		if not _road_preview_delete_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_delete_cells, 0, 0.01)
+	_road_preview_place_cells.clear()
+	_road_preview_delete_cells.clear()
+
+
+func _refresh_pending_delete_visual() -> void:
+	if not _road_delete_confirm_pending:
+		return
+	if _road_pending_delete_cells.is_empty():
+		return
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("highlight_road_cells"):
+		return
+	var cells: Array[Vector2i] = []
+	for key in _road_pending_delete_cells.keys():
+		cells.append(key as Vector2i)
+	if not cells.is_empty():
+		# 用短时长循环刷新，保持持续红色预警
+		wm.call("highlight_road_cells", cells, 3, 0.35)
+
+
+func _update_road_point_preview(current_cell: Vector2i) -> void:
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("highlight_road_cells"):
+		return
+	# 先清旧预览，避免短时高亮叠加导致视觉不稳定
+	if wm.has_method("highlight_road_cells"):
+		if not _road_preview_place_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_place_cells, 0, 0.01)
+		if not _road_preview_delete_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_delete_cells, 0, 0.01)
+	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END:
+		_road_preview_place_cells = _compute_quick_place_path(_road_batch_start_cell, current_cell)
+		if not _road_preview_place_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_place_cells, 2, 0.6)
+		_road_preview_delete_cells.clear()
+	elif _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
+		_road_preview_delete_cells = _compute_quick_delete_cells(_road_batch_start_cell, current_cell)
+		if not _road_preview_delete_cells.is_empty():
+			wm.call("highlight_road_cells", _road_preview_delete_cells, 3, 0.6)
+		_road_preview_place_cells.clear()
+
+
+func _cancel_road_delete_confirm_state() -> void:
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm and wm.has_method("highlight_road_cells") and not _road_pending_delete_cells.is_empty():
+		var cells: Array[Vector2i] = []
+		for key in _road_pending_delete_cells.keys():
+			cells.append(key as Vector2i)
+		if not cells.is_empty():
+			wm.call("highlight_road_cells", cells, 0, 0.01)
+	_road_pending_delete_cells.clear()
+	_road_delete_confirm_pending = false
+	_road_batch_mode = RoadBatchMode.NONE
+	_delete_intent = DeleteIntent.NONE
+	_clear_road_point_preview()
+	_update_delete_hint_visibility()
+
+
+func _cancel_delete_confirmation_state() -> void:
+	if _build_picked_original != null:
+		_restore_picked_original()
+	_cancel_road_delete_confirm_state()
+
+
+func _confirm_delete_intent() -> void:
+	if _delete_intent == DeleteIntent.PICKED_BUILDING:
+		_finalize_picked_original()
+		_cancel_build_selection()
+		return
+	if _delete_intent == DeleteIntent.ROAD_BATCH:
+		_confirm_pending_road_delete()
+
+
+func _on_delete_overlay_input(event: InputEvent) -> void:
+	if not (_delete_intent != DeleteIntent.NONE):
+		return
+	if not (event is InputEventMouseButton):
+		return
+	var mb := event as InputEventMouseButton
+	if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+		_confirm_delete_intent()
+		get_viewport().set_input_as_handled()
+
+
 func _refresh_build_button_highlight() -> void:
+	var suppress_selection := (_build_picked_original != null) or _road_delete_confirm_pending
 	for id_key in _build_buttons_by_id.keys():
 		var btn: Button = _build_buttons_by_id[id_key] as Button
 		if btn == null:
 			continue
-		var is_selected := str(id_key) == _build_selected_id
+		var is_selected := (not suppress_selection) and str(id_key) == _build_selected_id
 		_apply_build_button_style(btn, is_selected)
 
 

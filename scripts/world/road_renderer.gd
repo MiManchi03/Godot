@@ -42,6 +42,9 @@ func _create_mesh_library() -> void:
 	# Item 2: 蓝色路径高亮（更亮）
 	_create_highlight_mesh_item(2, Color(0.4, 0.6, 1.0, 0.8))
 	
+	# Item 3: 红色删除预警
+	_create_highlight_mesh_item(3, Color(1.0, 0.2, 0.2, 0.75))
+	
 	_grid_map.mesh_library = _mesh_library
 
 
@@ -76,6 +79,7 @@ func _create_road_mesh_item(item_id: int, base_color: Color, lane_color: Color) 
 	
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(1, 1, 1, 1)
+	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 0.9
 	mat.metallic = 0.0
 	mesh.surface_set_material(0, mat)
@@ -120,6 +124,7 @@ func _create_highlight_mesh_item(item_id: int, highlight_color: Color) -> void:
 	
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(1, 1, 1, 1)
+	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 0.5
 	mat.metallic = 0.1
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

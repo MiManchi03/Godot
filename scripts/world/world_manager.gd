@@ -1154,12 +1154,12 @@ func _set_road_visual_mode(road_node: Node3D, visible: bool) -> void:
 			(child as MeshInstance3D).visible = visible
 
 
-func highlight_road_cells(cells: Array, item_type: int = 1) -> void:
+func highlight_road_cells(cells: Array, item_type: int = 1, duration: float = 2.0) -> void:
 	if road_renderer and road_renderer.has_method("highlight_cells"):
 		var typed_cells: Array[Vector2i] = []
 		for c in cells:
 			typed_cells.append(c as Vector2i)
-		road_renderer.call("highlight_cells", typed_cells, item_type)
+		road_renderer.call("highlight_cells", typed_cells, item_type, duration)
 
 
 func get_road_node_at_cell(cell: Vector2i) -> Node3D:
