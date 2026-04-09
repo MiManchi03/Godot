@@ -172,6 +172,23 @@ func set_road_cell(cell: Vector2i, item_type: int = 0) -> void:
 		return
 	var grid_pos := Vector3i(cell.x, 0, cell.y)
 	_grid_map.set_cell_item(grid_pos, item_type)
+	if item_type < 0:
+		_highlight_cells.erase(cell)
+
+
+func get_road_cell_item(cell: Vector2i) -> int:
+	if _grid_map == null:
+		return -1
+	var grid_pos := Vector3i(cell.x, 0, cell.y)
+	return _grid_map.get_cell_item(grid_pos)
+
+
+func set_road_cells_item(cells: Array, item_type: int) -> void:
+	for cell_variant in cells:
+		if not (cell_variant is Vector2i):
+			continue
+		var cell := cell_variant as Vector2i
+		set_road_cell(cell, item_type)
 
 
 func remove_road_cell(cell: Vector2i) -> void:

@@ -138,8 +138,9 @@ var _road_pending_delete_cells: Dictionary = {}
 var _road_delete_confirm_pending: bool = false
 var _build_delete_overlay: ColorRect
 var _build_delete_trash_label: Label
-var _road_preview_place_cells: Array[Vector2i] = []
-var _road_preview_delete_cells: Array[Vector2i] = []
+var _preview_base_state: Dictionary = {} # Dictionary[Vector2i, int]
+var _preview_active_cells: Array[Vector2i] = []
+var _pending_delete_visual_cells: Array[Vector2i] = []
 var _delete_intent: int = DeleteIntent.NONE
 var _build_rotating_target: Node3D
 var _build_rotating_original_y: float = 0.0
@@ -1058,10 +1059,10 @@ func _handle_road_right_click() -> void:
 
 	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END:
 		var path_cells := _compute_quick_place_path(_road_batch_start_cell, cell)
+		_clear_road_point_preview()
 		if not path_cells.is_empty():
 			_apply_quick_place_path(path_cells)
 		_road_batch_mode = RoadBatchMode.NONE
-		_clear_road_point_preview()
 		return
 
 	if _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
@@ -1743,15 +1744,46 @@ func _is_point_in_delete_area(screen_pos: Vector2) -> bool:
 	return rect.has_point(screen_pos)
 
 
-func _clear_road_point_preview() -> void:
+func _capture_preview_base_state(cells: Array[Vector2i]) -> void:
 	var wm := get_node_or_null("/root/World/WorldManager")
-	if wm and wm.has_method("highlight_road_cells"):
-		if not _road_preview_place_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_place_cells, 0, 0.01)
-		if not _road_preview_delete_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_delete_cells, 0, 0.01)
-	_road_preview_place_cells.clear()
-	_road_preview_delete_cells.clear()
+	if wm == null or not wm.has_method("get_road_visual_item"):
+		return
+	for cell in cells:
+		if _preview_base_state.has(cell):
+			continue
+		_preview_base_state[cell] = int(wm.call("get_road_visual_item", cell))
+
+
+func _restore_preview_visuals() -> void:
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("set_road_visual_item"):
+		_preview_active_cells.clear()
+		return
+	for cell in _preview_active_cells:
+		var base_item := int(_preview_base_state.get(cell, -1))
+		if base_item < 0:
+			wm.call("set_road_visual_item", cell, -1)
+		else:
+			wm.call("set_road_visual_item", cell, base_item)
+	_preview_active_cells.clear()
+
+
+func _apply_preview_visuals(cells: Array[Vector2i], item_type: int) -> void:
+	_restore_preview_visuals()
+	if cells.is_empty():
+		return
+	_capture_preview_base_state(cells)
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("set_road_visual_items"):
+		return
+	wm.call("set_road_visual_items", cells, item_type)
+	_preview_active_cells = cells.duplicate()
+
+
+func _clear_road_point_preview() -> void:
+	_restore_preview_visuals()
+	_preview_base_state.clear()
+	_pending_delete_visual_cells.clear()
 
 
 func _refresh_pending_delete_visual() -> void:
@@ -1759,47 +1791,26 @@ func _refresh_pending_delete_visual() -> void:
 		return
 	if _road_pending_delete_cells.is_empty():
 		return
-	var wm := get_node_or_null("/root/World/WorldManager")
-	if wm == null or not wm.has_method("highlight_road_cells"):
-		return
 	var cells: Array[Vector2i] = []
 	for key in _road_pending_delete_cells.keys():
 		cells.append(key as Vector2i)
-	if not cells.is_empty():
-		# 用短时长循环刷新，保持持续红色预警
-		wm.call("highlight_road_cells", cells, 3, 0.35)
+	if cells.is_empty():
+		return
+	_pending_delete_visual_cells = cells.duplicate()
+	_apply_preview_visuals(_pending_delete_visual_cells, 3)
 
 
 func _update_road_point_preview(current_cell: Vector2i) -> void:
-	var wm := get_node_or_null("/root/World/WorldManager")
-	if wm == null or not wm.has_method("highlight_road_cells"):
-		return
-	# 先清旧预览，避免短时高亮叠加导致视觉不稳定
-	if wm.has_method("highlight_road_cells"):
-		if not _road_preview_place_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_place_cells, 0, 0.01)
-		if not _road_preview_delete_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_delete_cells, 0, 0.01)
 	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END:
-		_road_preview_place_cells = _compute_quick_place_path(_road_batch_start_cell, current_cell)
-		if not _road_preview_place_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_place_cells, 2, 0.6)
-		_road_preview_delete_cells.clear()
+		var place_cells := _compute_quick_place_path(_road_batch_start_cell, current_cell)
+		_apply_preview_visuals(place_cells, 2)
 	elif _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
-		_road_preview_delete_cells = _compute_quick_delete_cells(_road_batch_start_cell, current_cell)
-		if not _road_preview_delete_cells.is_empty():
-			wm.call("highlight_road_cells", _road_preview_delete_cells, 3, 0.6)
-		_road_preview_place_cells.clear()
+		var delete_cells := _compute_quick_delete_cells(_road_batch_start_cell, current_cell)
+		_apply_preview_visuals(delete_cells, 3)
 
 
 func _cancel_road_delete_confirm_state() -> void:
-	var wm := get_node_or_null("/root/World/WorldManager")
-	if wm and wm.has_method("highlight_road_cells") and not _road_pending_delete_cells.is_empty():
-		var cells: Array[Vector2i] = []
-		for key in _road_pending_delete_cells.keys():
-			cells.append(key as Vector2i)
-		if not cells.is_empty():
-			wm.call("highlight_road_cells", cells, 0, 0.01)
+	_restore_preview_visuals()
 	_road_pending_delete_cells.clear()
 	_road_delete_confirm_pending = false
 	_road_batch_mode = RoadBatchMode.NONE

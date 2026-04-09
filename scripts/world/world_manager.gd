@@ -1237,6 +1237,24 @@ func set_road_cell_visible(cell: Vector2i, visible: bool) -> void:
 			road_renderer.call("remove_road_cell", cell)
 
 
+func get_road_visual_item(cell: Vector2i) -> int:
+	if road_renderer == null or not road_renderer.has_method("get_road_cell_item"):
+		return -1
+	return int(road_renderer.call("get_road_cell_item", cell))
+
+
+func set_road_visual_item(cell: Vector2i, item_type: int) -> void:
+	if road_renderer == null or not road_renderer.has_method("set_road_cell"):
+		return
+	road_renderer.call("set_road_cell", cell, item_type)
+
+
+func set_road_visual_items(cells: Array, item_type: int) -> void:
+	if road_renderer == null or not road_renderer.has_method("set_road_cells_item"):
+		return
+	road_renderer.call("set_road_cells_item", cells, item_type)
+
+
 func has_road_cell(cell: Vector2i) -> bool:
 	var road_network: Node = null
 	if get_tree() != null:
