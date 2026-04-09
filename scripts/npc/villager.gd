@@ -2,6 +2,8 @@ extends CharacterBody3D
 
 const MOVE_SPEED: float = 2.3
 const CELL_REACH_EPS: float = 0.08
+const PATROL_REACH_EPS: float = 0.2
+const PATROL_REBUILD_DEBOUNCE: float = 0.2
 const QUESTION_SHOW_TIME: float = 0.45
 const WORK_TIME: float = 1.5
 const UNLOAD_TIME: float = 0.8
@@ -31,6 +33,12 @@ var _current_path: Array[Vector2i] = []
 var _path_index: int = 0
 var _work_timer: float = 0.0
 var _last_cell: Vector2i = Vector2i.ZERO
+var _patrol_path: Array[Vector2i] = []
+var _patrol_index: int = 0
+var _patrol_dir: int = 1
+var _patrol_dirty: bool = true
+var _patrol_rebuild_timer: float = 0.0
+var _road_network_bound: bool = false
 
 var _hint_sprite: Sprite3D
 var _item_sprite: Sprite3D
@@ -39,6 +47,12 @@ func _ready() -> void:
 	add_to_group("villager")
 	_setup_hints()
 	_last_cell = _current_cell()
+	var road_network: Node = null
+	if get_tree() != null:
+		road_network = get_tree().get_first_node_in_group("road_network")
+	if road_network and road_network.has_signal("road_network_changed") and not _road_network_bound:
+		road_network.connect("road_network_changed", Callable(self, "_on_road_network_changed"))
+		_road_network_bound = true
 
 
 func _setup_hints() -> void:
@@ -112,26 +126,190 @@ func _physics_process(delta: float) -> void:
 	_building_cache_timer = maxf(_building_cache_timer - delta, 0.0)
 	
 	var road_network: Node = null
-	var world_manager: Node = null
 	if get_tree() != null:
 		road_network = get_tree().get_first_node_in_group("road_network")
-		world_manager = get_tree().get_first_node_in_group("world_manager")
-	
-	match _task_state:
-		TaskState.UNBOUND:
-			_wander_on_roads(delta, road_network)
-		TaskState.WAITING:
-			_try_start_task(delta, road_network)
-		TaskState.TO_START:
-			_follow_path(delta, road_network, TaskState.AT_START)
-		TaskState.AT_START:
-			_do_work(delta)
-		TaskState.TO_END:
-			_follow_path(delta, road_network, TaskState.AT_END)
-		TaskState.AT_END:
-			_unload_item(delta)
-		TaskState.RETURNING:
-			_follow_path(delta, road_network, TaskState.WAITING)
+	if road_network and road_network.has_signal("road_network_changed") and not _road_network_bound:
+		road_network.connect("road_network_changed", Callable(self, "_on_road_network_changed"))
+		_road_network_bound = true
+
+	if _patrol_rebuild_timer > 0.0:
+		_patrol_rebuild_timer = maxf(_patrol_rebuild_timer - delta, 0.0)
+
+	# 全员统一行为：沿道路来回巡逻
+	if (_patrol_path.is_empty() or _patrol_dirty) and _patrol_rebuild_timer <= 0.0:
+		var rebuilt := _rebuild_patrol_path(road_network)
+		if rebuilt:
+			_patrol_dirty = false
+		else:
+			_patrol_rebuild_timer = PATROL_REBUILD_DEBOUNCE
+
+	if _patrol_path.is_empty():
+		velocity = Vector3.ZERO
+		move_and_slide()
+		return
+
+	if _patrol_index < 0 or _patrol_index >= _patrol_path.size():
+		_patrol_index = clampi(_patrol_index, 0, _patrol_path.size() - 1)
+
+	var target_cell := _patrol_path[_patrol_index]
+	var target_pos := _road_cell_center(target_cell)
+	target_pos.y = global_position.y
+	_move_towards(target_pos, delta)
+
+	if global_position.distance_to(target_pos) <= PATROL_REACH_EPS:
+		if _patrol_path.size() <= 1:
+			_patrol_index = 0
+			_patrol_dirty = true
+			_patrol_rebuild_timer = PATROL_REBUILD_DEBOUNCE
+			return
+		_patrol_index += _patrol_dir
+		if _patrol_index >= _patrol_path.size():
+			_patrol_dir = -1
+			_patrol_index = _patrol_path.size() - 2
+		elif _patrol_index < 0:
+			_patrol_dir = 1
+			_patrol_index = 1
+
+
+func _rebuild_patrol_path(road_network: Node) -> bool:
+	if road_network == null or not road_network.has_method("has_road_at") or not road_network.has_method("find_path") or not road_network.has_method("get_all_road_cells"):
+		return false
+
+	var roads_raw = road_network.call("get_all_road_cells")
+	if not (roads_raw is Array):
+		return false
+	var roads: Array = roads_raw as Array
+	if roads.is_empty():
+		return false
+
+	var start_cell := _current_cell()
+	if not bool(road_network.call("has_road_at", start_cell)):
+		var nearest := _find_nearest_road_cell_from_list(start_cell, roads)
+		if nearest == Vector2i(2147483647, 2147483647):
+			return false
+		start_cell = nearest
+
+	var component := _collect_component_cells(start_cell, road_network)
+	if component.is_empty():
+		return false
+
+	var endpoints: Array[Vector2i] = []
+	for c in component:
+		var cell := c as Vector2i
+		if _road_degree_in_set(cell, component) <= 1:
+			endpoints.append(cell)
+
+	var from_cell := start_cell
+	var to_cell := start_cell
+	if endpoints.size() >= 2:
+		var best_len := -1
+		for i in range(endpoints.size()):
+			for j in range(i + 1, endpoints.size()):
+				var pair_raw = road_network.call("find_path", endpoints[i], endpoints[j])
+				if not (pair_raw is Array):
+					continue
+				var pair_path: Array = pair_raw as Array
+				if pair_path.size() > best_len:
+					best_len = pair_path.size()
+					from_cell = endpoints[i]
+					to_cell = endpoints[j]
+	else:
+		# 闭环或无端点：选离当前位置最远点作为折返点
+		var far_d := -1
+		for c in component:
+			var cell := c as Vector2i
+			var d := absi(cell.x - start_cell.x) + absi(cell.y - start_cell.y)
+			if d > far_d:
+				far_d = d
+				to_cell = cell
+		from_cell = start_cell
+
+	var path_raw = road_network.call("find_path", from_cell, to_cell)
+	if not (path_raw is Array):
+		return false
+	var path: Array = path_raw as Array
+	if path.is_empty():
+		return false
+
+	var new_patrol_path: Array[Vector2i] = []
+	for p in path:
+		new_patrol_path.append(p as Vector2i)
+
+	# 避免路网重建中间态把有效巡逻路径退化成单点导致停住
+	if new_patrol_path.size() <= 1 and _patrol_path.size() > 1:
+		return false
+
+	_patrol_path = new_patrol_path
+
+	# 从离当前最近的点开始巡逻，减少瞬移感
+	var nearest_idx := 0
+	var nearest_d2 := INF
+	for i in range(_patrol_path.size()):
+		var c := _patrol_path[i]
+		var wp := _road_cell_center(c)
+		wp.y = global_position.y
+		var d2 := global_position.distance_squared_to(wp)
+		if d2 < nearest_d2:
+			nearest_d2 = d2
+			nearest_idx = i
+	_patrol_index = nearest_idx
+	_patrol_dir = 1
+	return true
+
+
+func _find_nearest_road_cell_from_list(origin: Vector2i, roads: Array) -> Vector2i:
+	var best := Vector2i(2147483647, 2147483647)
+	var best_d2 := INF
+	for r in roads:
+		var c := r as Vector2i
+		var dx := float(c.x - origin.x)
+		var dz := float(c.y - origin.y)
+		var d2 := dx * dx + dz * dz
+		if d2 < best_d2:
+			best_d2 = d2
+			best = c
+	return best
+
+
+func _collect_component_cells(start_cell: Vector2i, road_network: Node) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	var visited: Dictionary = {}
+	var queue: Array[Vector2i] = [start_cell]
+	visited[start_cell] = true
+	while not queue.is_empty():
+		var cur: Vector2i = queue.pop_front()
+		result.append(cur)
+		var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+		for d in dirs:
+			var nb: Vector2i = cur + d
+			if visited.has(nb):
+				continue
+			if bool(road_network.call("has_road_at", nb)):
+				visited[nb] = true
+				queue.append(nb)
+	return result
+
+
+func _road_degree_in_set(cell: Vector2i, cell_set: Array[Vector2i]) -> int:
+	var set_map: Dictionary = {}
+	for c in cell_set:
+		set_map[c] = true
+	var deg := 0
+	var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for d in dirs:
+		if set_map.has(cell + d):
+			deg += 1
+	return deg
+
+
+func _road_cell_center(cell: Vector2i) -> Vector3:
+	# 当前道路系统以整数格为道路中心
+	return Vector3(float(cell.x), 0.0, float(cell.y))
+
+
+func _on_road_network_changed() -> void:
+	_patrol_dirty = true
+	_patrol_rebuild_timer = PATROL_REBUILD_DEBOUNCE
 
 
 func _update_hint_visibility(delta: float) -> void:
@@ -497,6 +675,7 @@ func _on_placed() -> void:
 		world_manager = get_tree().get_first_node_in_group("world_manager")
 	if world_manager and world_manager.has_method("save_villager_state"):
 		world_manager.call("save_villager_state", self, false)
+	_patrol_dirty = true
 
 
 func on_loaded_from_save() -> void:
@@ -510,6 +689,7 @@ func on_loaded_from_save() -> void:
 	_building_cache_timer = 0.0
 	_cached_start_pos = Vector3.ZERO
 	_cached_end_pos = Vector3.ZERO
+	_patrol_dirty = true
 
 
 func _try_auto_bind_task() -> void:

@@ -141,6 +141,11 @@ var _build_delete_trash_label: Label
 var _preview_base_state: Dictionary = {} # Dictionary[Vector2i, int]
 var _preview_active_cells: Array[Vector2i] = []
 var _pending_delete_visual_cells: Array[Vector2i] = []
+var _delete_rect_box: Panel
+var _delete_rect_active: bool = false
+var _delete_rect_persist: bool = false
+var _delete_rect_start_cell: Vector2i = Vector2i.ZERO
+var _delete_rect_end_cell: Vector2i = Vector2i.ZERO
 var _delete_intent: int = DeleteIntent.NONE
 var _build_rotating_target: Node3D
 var _build_rotating_original_y: float = 0.0
@@ -310,6 +315,24 @@ func _setup_build_mode_ui() -> void:
 	_build_delete_trash_label.modulate = Color(1.0, 0.9, 0.9, 0.96)
 	_build_delete_trash_label.visible = false
 	bottom_panel.add_child(_build_delete_trash_label)
+
+	_delete_rect_box = Panel.new()
+	_delete_rect_box.name = "DeleteRectBox"
+	_delete_rect_box.visible = false
+	_delete_rect_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var rect_style := StyleBoxFlat.new()
+	rect_style.bg_color = Color(1.0, 0.9, 0.35, 0.14)
+	rect_style.border_width_left = 2
+	rect_style.border_width_top = 2
+	rect_style.border_width_right = 2
+	rect_style.border_width_bottom = 2
+	rect_style.border_color = Color(1.0, 0.85, 0.2, 0.8)
+	rect_style.corner_radius_top_left = 0
+	rect_style.corner_radius_top_right = 0
+	rect_style.corner_radius_bottom_left = 0
+	rect_style.corner_radius_bottom_right = 0
+	_delete_rect_box.add_theme_stylebox_override("panel", rect_style)
+	_build_ui_root.add_child(_delete_rect_box)
 
 	var right_panel := PanelContainer.new()
 	right_panel.anchor_left = 1.0
@@ -847,6 +870,7 @@ func _update_build_mode(delta: float) -> void:
 	_update_build_preview()
 	if _road_delete_confirm_pending:
 		_refresh_pending_delete_visual()
+	_update_delete_rect_visual()
 	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END or _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
 		var ground := _mouse_ground_position()
 		if ground != Vector3.ZERO:
@@ -1049,12 +1073,18 @@ func _handle_road_right_click() -> void:
 		if has_road:
 			_road_batch_start_cell = cell
 			_road_batch_mode = RoadBatchMode.DELETE_WAIT_END
+			_delete_rect_start_cell = cell
+			_delete_rect_end_cell = cell
+			_delete_rect_active = true
+			_delete_rect_persist = false
 			return
 		var can_place := (_build_selected_id == "road") or (_build_picked_original != null and _build_picked_original_build_id == "road")
 		if not can_place:
 			return
 		_road_batch_start_cell = cell
 		_road_batch_mode = RoadBatchMode.PLACE_WAIT_END
+		_delete_rect_active = false
+		_delete_rect_persist = false
 		return
 
 	if _road_batch_mode == RoadBatchMode.PLACE_WAIT_END:
@@ -1069,6 +1099,8 @@ func _handle_road_right_click() -> void:
 		if not has_road:
 			_road_batch_mode = RoadBatchMode.NONE
 			_clear_road_point_preview()
+			_delete_rect_active = false
+			_delete_rect_persist = false
 			return
 		var delete_cells := _compute_quick_delete_cells(_road_batch_start_cell, cell)
 		_road_pending_delete_cells.clear()
@@ -1076,6 +1108,9 @@ func _handle_road_right_click() -> void:
 			_road_pending_delete_cells[c] = true
 		_road_delete_confirm_pending = not _road_pending_delete_cells.is_empty()
 		_delete_intent = DeleteIntent.ROAD_BATCH if _road_delete_confirm_pending else DeleteIntent.NONE
+		_delete_rect_end_cell = cell
+		_delete_rect_active = _road_delete_confirm_pending
+		_delete_rect_persist = _road_delete_confirm_pending
 		_refresh_pending_delete_visual()
 		_road_batch_mode = RoadBatchMode.NONE
 		_update_delete_hint_visibility()
@@ -1702,6 +1737,8 @@ func _cancel_build_selection() -> void:
 	_road_pending_delete_cells.clear()
 	_road_delete_confirm_pending = false
 	_delete_intent = DeleteIntent.NONE
+	_delete_rect_active = false
+	_delete_rect_persist = false
 	_clear_road_point_preview()
 	_restore_picked_original()
 	_cancel_rotate_selection(false)
@@ -1805,8 +1842,51 @@ func _update_road_point_preview(current_cell: Vector2i) -> void:
 		var place_cells := _compute_quick_place_path(_road_batch_start_cell, current_cell)
 		_apply_preview_visuals(place_cells, 2)
 	elif _road_batch_mode == RoadBatchMode.DELETE_WAIT_END:
+		if not _delete_rect_persist:
+			_delete_rect_end_cell = current_cell
 		var delete_cells := _compute_quick_delete_cells(_road_batch_start_cell, current_cell)
 		_apply_preview_visuals(delete_cells, 3)
+
+
+func _update_delete_rect_visual() -> void:
+	if _delete_rect_box == null:
+		return
+	if not _delete_rect_active:
+		_delete_rect_box.visible = false
+		return
+	# 仅在非共线时显示矩形框
+	if _delete_rect_start_cell.x == _delete_rect_end_cell.x or _delete_rect_start_cell.y == _delete_rect_end_cell.y:
+		_delete_rect_box.visible = false
+		return
+	if camera == null:
+		_delete_rect_box.visible = false
+		return
+	# 道路单元以整数格中心对齐，外框应贴在最外层道路块外边缘（±0.5）
+	var min_x := mini(_delete_rect_start_cell.x, _delete_rect_end_cell.x)
+	var max_x := maxi(_delete_rect_start_cell.x, _delete_rect_end_cell.x)
+	var min_z := mini(_delete_rect_start_cell.y, _delete_rect_end_cell.y)
+	var max_z := maxi(_delete_rect_start_cell.y, _delete_rect_end_cell.y)
+	var x0 := float(min_x) - 0.5
+	var x1 := float(max_x) + 0.5
+	var z0 := float(min_z) - 0.5
+	var z1 := float(max_z) + 0.5
+	var corners: Array[Vector3] = [
+		Vector3(x0, 0.03, z0),
+		Vector3(x1, 0.03, z0),
+		Vector3(x1, 0.03, z1),
+		Vector3(x0, 0.03, z1),
+	]
+	var min_screen := Vector2(1e20, 1e20)
+	var max_screen := Vector2(-1e20, -1e20)
+	for w in corners:
+		var s := camera.unproject_position(w)
+		min_screen.x = minf(min_screen.x, s.x)
+		min_screen.y = minf(min_screen.y, s.y)
+		max_screen.x = maxf(max_screen.x, s.x)
+		max_screen.y = maxf(max_screen.y, s.y)
+	_delete_rect_box.position = min_screen
+	_delete_rect_box.size = (max_screen - min_screen).abs()
+	_delete_rect_box.visible = true
 
 
 func _cancel_road_delete_confirm_state() -> void:
@@ -1815,6 +1895,8 @@ func _cancel_road_delete_confirm_state() -> void:
 	_road_delete_confirm_pending = false
 	_road_batch_mode = RoadBatchMode.NONE
 	_delete_intent = DeleteIntent.NONE
+	_delete_rect_active = false
+	_delete_rect_persist = false
 	_clear_road_point_preview()
 	_update_delete_hint_visibility()
 
