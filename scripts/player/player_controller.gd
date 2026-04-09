@@ -865,7 +865,7 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
-		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and _delete_intent != DeleteIntent.NONE and _is_point_in_build_list_area(mouse_event.position):
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and _delete_intent != DeleteIntent.NONE and _is_point_in_delete_area(mouse_event.position):
 			_confirm_delete_intent()
 			get_viewport().set_input_as_handled()
 			return
@@ -1733,6 +1733,13 @@ func _is_point_in_build_list_area(screen_pos: Vector2) -> bool:
 	if _build_list_scroll == null:
 		return false
 	var rect := _build_list_scroll.get_global_rect()
+	return rect.has_point(screen_pos)
+
+
+func _is_point_in_delete_area(screen_pos: Vector2) -> bool:
+	if _build_delete_overlay == null or not _build_delete_overlay.visible:
+		return false
+	var rect := _build_delete_overlay.get_global_rect()
 	return rect.has_point(screen_pos)
 
 
