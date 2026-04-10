@@ -950,12 +950,16 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			if _holding_villager != null:
 				_place_held_villager()
 				return
+
+			if _build_picked_original != null:
+				_try_place_building()
+				return
 			
 			if is_double_click:
 				if _try_pick_villager():
 					_build_ignore_place_until_ms = now_ms + 140
 					return
-				if _try_pick_existing_building_to_preview():
+				if _build_picked_original == null and _try_pick_existing_building_to_preview():
 					_build_ignore_place_until_ms = now_ms + 140
 					return
 			if now_ms < _build_ignore_place_until_ms:
@@ -1319,7 +1323,6 @@ func _stash_picked_original(target: Node3D, build_id: String, pos: Vector3, rot_
 		if world_manager and world_manager.has_method("begin_pickup_road"):
 			var cell := Vector2i(roundi(pos.x), roundi(pos.z))
 			world_manager.call("begin_pickup_road", cell)
-	_delete_intent = DeleteIntent.PICKED_BUILDING
 	_update_delete_hint_visibility()
 
 
@@ -1375,8 +1378,6 @@ func _clear_picked_original() -> void:
 	_build_picked_original_was_player_placed = false
 	_build_picked_original_entity_id = ""
 	_build_picked_original_collision.clear()
-	if _delete_intent == DeleteIntent.PICKED_BUILDING:
-		_delete_intent = DeleteIntent.NONE
 	_update_delete_hint_visibility()
 
 
@@ -1747,7 +1748,7 @@ func _cancel_build_selection() -> void:
 
 
 func _update_delete_hint_visibility() -> void:
-	var active := _delete_intent != DeleteIntent.NONE
+	var active := (_delete_intent != DeleteIntent.NONE) or (_build_picked_original != null)
 	if _build_delete_overlay:
 		_build_delete_overlay.visible = active
 	if _build_delete_trash_label:
@@ -1908,10 +1909,6 @@ func _cancel_delete_confirmation_state() -> void:
 
 
 func _confirm_delete_intent() -> void:
-	if _delete_intent == DeleteIntent.PICKED_BUILDING:
-		_finalize_picked_original()
-		_cancel_build_selection()
-		return
 	if _delete_intent == DeleteIntent.ROAD_BATCH:
 		_confirm_pending_road_delete()
 
@@ -2045,28 +2042,47 @@ func _find_building_root_from_collider(collider: Object) -> Node3D:
 	if not (collider is Node):
 		return null
 	var current: Node = collider as Node
+	var candidate: Node3D = null
 	while current != null:
 		if _build_preview and _build_preview.preview_root:
 			var preview_root := _build_preview.preview_root
 			if current == preview_root or preview_root.is_ancestor_of(current):
 				return null
 		if current is Node3D:
-			var build_id := _resolve_build_id(current as Node3D)
-			if not build_id.is_empty():
-				return current as Node3D
+			var node3d := current as Node3D
+			if _is_pickable_building_root(node3d):
+				# Keep walking upward to prefer the top-most building root.
+				candidate = node3d
 		current = current.get_parent()
-	return null
+	return candidate
 
 
 func _collect_building_roots(node: Node, out: Array[Node3D]) -> void:
 	if node is Node3D:
 		var node3d := node as Node3D
-		if _build_preview == null or node3d != _build_preview.preview_root:
-			var build_id := _resolve_build_id(node3d)
-			if not build_id.is_empty():
-				out.append(node3d)
+		if _is_pickable_building_root(node3d):
+			out.append(node3d)
 	for child in node.get_children():
 		_collect_building_roots(child, out)
+
+
+func _is_pickable_building_root(node3d: Node3D) -> bool:
+	if node3d == null:
+		return false
+	if _build_preview and _build_preview.preview_root:
+		var preview_root := _build_preview.preview_root
+		if node3d == preview_root or preview_root.is_ancestor_of(node3d):
+			return false
+	if not node3d.has_meta("build_id"):
+		return false
+	var build_id := str(node3d.get_meta("build_id", ""))
+	if build_id.is_empty():
+		return false
+	if bool(node3d.get_meta("picked_hidden", false)):
+		return false
+	if bool(node3d.get_meta("pending_delete", false)):
+		return false
+	return true
 
 
 func _find_building_root_by_screen_proximity(mouse_pos: Vector2, max_px: float) -> Node3D:
@@ -2124,6 +2140,8 @@ func _find_nearest_road_at_position(world_pos: Vector3, max_dist: float) -> Node
 
 
 func _try_pick_existing_building_to_preview() -> bool:
+	if _build_picked_original != null:
+		return false
 	if not camera:
 		if BUILD_PICK_DEBUG:
 			print("[BUILD_PICK] fail: camera missing")
