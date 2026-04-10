@@ -4,6 +4,10 @@ const MOVE_SPEED: float = 2.3
 const CELL_REACH_EPS: float = 0.08
 const PATROL_REACH_EPS: float = 0.2
 const PATROL_REBUILD_DEBOUNCE: float = 0.2
+const PATROL_ENDPOINT_BACKOFF: float = 0.32
+const PATROL_STUCK_SPEED_EPS: float = 0.05
+const PATROL_STUCK_DIST_DELTA_EPS: float = 0.002
+const PATROL_STUCK_TIME: float = 0.45
 const QUESTION_SHOW_TIME: float = 0.45
 const WORK_TIME: float = 1.5
 const UNLOAD_TIME: float = 0.8
@@ -38,6 +42,8 @@ var _patrol_index: int = 0
 var _patrol_dir: int = 1
 var _patrol_dirty: bool = true
 var _patrol_rebuild_timer: float = 0.0
+var _patrol_stuck_time: float = 0.0
+var _patrol_last_target_dist: float = INF
 var _road_network_bound: bool = false
 
 var _hint_sprite: Sprite3D
@@ -145,6 +151,7 @@ func _physics_process(delta: float) -> void:
 
 	if _patrol_path.is_empty():
 		velocity = Vector3.ZERO
+		_reset_patrol_progress_tracking()
 		move_and_slide()
 		return
 
@@ -152,23 +159,30 @@ func _physics_process(delta: float) -> void:
 		_patrol_index = clampi(_patrol_index, 0, _patrol_path.size() - 1)
 
 	var target_cell := _patrol_path[_patrol_index]
-	var target_pos := _road_cell_center(target_cell)
+	var target_pos := _resolve_patrol_target(target_cell)
 	target_pos.y = global_position.y
 	_move_towards(target_pos, delta)
 
-	if global_position.distance_to(target_pos) <= PATROL_REACH_EPS:
+	var dist_to_target := global_position.distance_to(target_pos)
+	if dist_to_target <= PATROL_REACH_EPS:
+		_reset_patrol_progress_tracking()
 		if _patrol_path.size() <= 1:
 			_patrol_index = 0
 			_patrol_dirty = true
-			_patrol_rebuild_timer = PATROL_REBUILD_DEBOUNCE
+			_patrol_rebuild_timer = 0.0  # 立即重试，不延迟
 			return
-		_patrol_index += _patrol_dir
-		if _patrol_index >= _patrol_path.size():
-			_patrol_dir = -1
-			_patrol_index = _patrol_path.size() - 2
-		elif _patrol_index < 0:
-			_patrol_dir = 1
-			_patrol_index = 1
+		_advance_patrol_index()
+	else:
+		var stalled_speed := velocity.length() <= PATROL_STUCK_SPEED_EPS
+		var stalled_dist := absf(_patrol_last_target_dist - dist_to_target) <= PATROL_STUCK_DIST_DELTA_EPS
+		if stalled_speed or stalled_dist:
+			_patrol_stuck_time += delta
+		else:
+			_patrol_stuck_time = 0.0
+		_patrol_last_target_dist = dist_to_target
+		if _patrol_stuck_time >= PATROL_STUCK_TIME and _patrol_path.size() > 1:
+			_reset_patrol_progress_tracking()
+			_advance_patrol_index()
 
 
 func _rebuild_patrol_path(road_network: Node) -> bool:
@@ -235,9 +249,22 @@ func _rebuild_patrol_path(road_network: Node) -> bool:
 	for p in path:
 		new_patrol_path.append(p as Vector2i)
 
-	# 避免路网重建中间态把有效巡逻路径退化成单点导致停住
-	if new_patrol_path.size() <= 1 and _patrol_path.size() > 1:
-		return false
+	# 兜底逻辑：当新路径退化为单点时，尝试找相邻路点作为临时折返点
+	if new_patrol_path.size() <= 1:
+		if _patrol_path.size() > 1:
+			# 旧路径有效，保留旧路径继续用（不清空）
+			return false
+		# 旧路径也无效，尝试兜底找相邻路点
+		var fallback_cell := _find_fallback_neighbor(start_cell, road_network)
+		if fallback_cell != Vector2i(2147483647, 2147483647):
+			var fallback_raw = road_network.call("find_path", start_cell, fallback_cell)
+			if fallback_raw is Array:
+				var fp: Array = fallback_raw as Array
+				if fp.size() >= 2:
+					new_patrol_path.clear()
+					for p in fp:
+						new_patrol_path.append(p as Vector2i)
+		# 如果兜底后仍只有单点，说明真的无路可走，保持原地等待
 
 	_patrol_path = new_patrol_path
 
@@ -254,6 +281,66 @@ func _rebuild_patrol_path(road_network: Node) -> bool:
 			nearest_idx = i
 	_patrol_index = nearest_idx
 	_patrol_dir = 1
+	_reset_patrol_progress_tracking()
+	return true
+
+
+func _advance_patrol_index() -> void:
+	_patrol_index += _patrol_dir
+	if _patrol_index >= _patrol_path.size():
+		_patrol_dir = -1
+		_patrol_index = _patrol_path.size() - 2
+	elif _patrol_index < 0:
+		_patrol_dir = 1
+		_patrol_index = 1
+
+
+func _reset_patrol_progress_tracking() -> void:
+	_patrol_stuck_time = 0.0
+	_patrol_last_target_dist = INF
+
+
+func _resolve_patrol_target(target_cell: Vector2i) -> Vector3:
+	var target := _road_cell_center(target_cell)
+	if _patrol_path.size() <= 1:
+		return target
+	var is_endpoint := _patrol_index == 0 or _patrol_index == _patrol_path.size() - 1
+	if not is_endpoint:
+		return target
+
+	var neighbor_idx := 1 if _patrol_index == 0 else _patrol_path.size() - 2
+	var neighbor_cell := _patrol_path[neighbor_idx]
+	var inward := _road_cell_center(neighbor_cell) - target
+	inward.y = 0.0
+	if inward.length_squared() <= 0.0001:
+		return target
+
+	var probe_from := global_position + Vector3(0.0, 0.55, 0.0)
+	var probe_to := target + Vector3(0.0, 0.55, 0.0)
+	if _is_patrol_target_blocked(probe_from, probe_to):
+		return target + inward.normalized() * PATROL_ENDPOINT_BACKOFF
+	return target
+
+
+func _is_patrol_target_blocked(from: Vector3, to: Vector3) -> bool:
+	var world3d := get_world_3d()
+	if world3d == null:
+		return false
+	var params := PhysicsRayQueryParameters3D.create(from, to)
+	params.collide_with_areas = false
+	params.collide_with_bodies = true
+	params.collision_mask = 1
+	params.exclude = [self]
+	var hit := world3d.direct_space_state.intersect_ray(params)
+	if hit.is_empty():
+		return false
+	var collider = hit.get("collider", null)
+	if collider == null:
+		return false
+	if collider is Node:
+		var node := collider as Node
+		if node == self or node.is_in_group("villager"):
+			return false
 	return true
 
 
@@ -300,6 +387,15 @@ func _road_degree_in_set(cell: Vector2i, cell_set: Array[Vector2i]) -> int:
 		if set_map.has(cell + d):
 			deg += 1
 	return deg
+
+
+func _find_fallback_neighbor(cell: Vector2i, road_network: Node) -> Vector2i:
+	var dirs: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	for d in dirs:
+		var nb: Vector2i = cell + d
+		if bool(road_network.call("has_road_at", nb)):
+			return nb
+	return Vector2i(2147483647, 2147483647)
 
 
 func _road_cell_center(cell: Vector2i) -> Vector3:
