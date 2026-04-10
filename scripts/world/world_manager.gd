@@ -37,6 +37,7 @@ var _road_state_dirty: bool = false
 
 func _ready() -> void:
 	add_to_group("world_manager")
+	_ensure_villager_system()
 	var road_network: Node = null
 	if get_tree() != null:
 		road_network = get_tree().get_first_node_in_group("road_network")
@@ -59,6 +60,25 @@ func _ready() -> void:
 	_emit_player_spawn_ready()
 
 	_update_chunks_around_player()
+
+
+func _ensure_villager_system() -> void:
+	if get_tree() == null:
+		return
+	var existing := get_tree().get_first_node_in_group("villager_system")
+	if existing != null:
+		return
+	var script := load("res://scripts/npc/villager_system.gd")
+	if script == null:
+		push_warning("[WorldManager] villager_system.gd not found")
+		return
+	var system_node = script.new()
+	if not (system_node is Node):
+		push_warning("[WorldManager] Failed to instantiate villager system")
+		return
+	var system := system_node as Node
+	system.name = "VillagerSystem"
+	add_child(system)
 
 
 func _process(_delta: float) -> void:
@@ -970,6 +990,63 @@ func find_building_by_id(build_id: String) -> Vector3:
 		if cached is Vector3:
 			return cached as Vector3
 	return Vector3.ZERO
+
+
+func get_house_occupant(house_entity_id: String) -> String:
+	if world_state == null:
+		return ""
+	if not world_state.has_method("get_house_occupant"):
+		return ""
+	return str(world_state.call("get_house_occupant", house_entity_id))
+
+
+func get_villager_house(villager_entity_id: String) -> String:
+	if world_state == null:
+		return ""
+	if not world_state.has_method("get_villager_house"):
+		return ""
+	return str(world_state.call("get_villager_house", villager_entity_id))
+
+
+func assign_villager_to_house(house_entity_id: String, villager_entity_id: String) -> bool:
+	if world_state == null:
+		return false
+	if not world_state.has_method("assign_villager_to_house"):
+		return false
+	var ok := bool(world_state.call("assign_villager_to_house", house_entity_id, villager_entity_id))
+	if ok:
+		world_state.save_dirty(true)
+	return ok
+
+
+func remove_house_occupant(house_entity_id: String) -> bool:
+	if world_state == null:
+		return false
+	if not world_state.has_method("remove_house_occupant"):
+		return false
+	var ok := bool(world_state.call("remove_house_occupant", house_entity_id))
+	if ok:
+		world_state.save_dirty(true)
+	return ok
+
+
+func find_node_by_entity_id(entity_id: String) -> Node3D:
+	if entity_id.is_empty():
+		return null
+	for chunk_root_variant in loaded_chunks.values():
+		var chunk_root := chunk_root_variant as Node3D
+		if chunk_root == null:
+			continue
+		var queue: Array[Node] = [chunk_root]
+		while not queue.is_empty():
+			var node := queue.pop_front() as Node
+			if node is Node3D:
+				var node3d := node as Node3D
+				if str(node3d.get_meta("entity_id", "")) == entity_id:
+					return node3d
+			for child in node.get_children():
+				queue.append(child)
+	return null
 
 
 func _rebuild_building_position_cache() -> void:

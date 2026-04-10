@@ -26,6 +26,7 @@ enum TaskState {
 @export var task_start_build_id: String = ""
 @export var task_end_build_id: String = ""
 @export var carrying_item: bool = false
+@export var fatigue: float = 0.0
 
 var _question_timer: float = 0.0
 var _task_replan_timer: float = 0.0
@@ -121,6 +122,10 @@ func cancel_task() -> void:
 
 func get_task_state() -> int:
 	return _task_state
+
+
+func get_fatigue() -> float:
+	return fatigue
 
 
 func _current_cell() -> Vector2i:

@@ -10,12 +10,15 @@ var chunk_size: int
 var world_dir: String
 var chunks_dir: String
 var meta_path: String
+var housing_path: String
 
 var _chunk_cache: Dictionary = {}
 var _dirty_keys: Dictionary = {}
 var _autosave_timer: float = 0.0
 var _player_position_cache: Dictionary = {}
 var _villager_chunk_index: Dictionary = {}
+var _house_occupancy: Dictionary = {}
+var _villager_housing: Dictionary = {}
 
 
 func _init(seed: int, chunk_span: int) -> void:
@@ -24,9 +27,11 @@ func _init(seed: int, chunk_span: int) -> void:
 	world_dir = "user://worlds/%d" % world_seed
 	chunks_dir = "%s/buildings" % world_dir
 	meta_path = "%s/meta.json" % world_dir
+	housing_path = "%s/housing.json" % world_dir
 	_ensure_world_dirs()
 	_write_meta(false)
 	_load_player_position()
+	_load_housing_data()
 
 
 func tick(delta: float) -> void:
@@ -305,8 +310,88 @@ func _save_player_position_to_disk() -> void:
 		f.store_string(JSON.stringify(_player_position_cache, "\t"))
 
 
+func _load_housing_data() -> void:
+	_house_occupancy.clear()
+	_villager_housing.clear()
+	if not FileAccess.file_exists(housing_path):
+		return
+	var f = FileAccess.open(housing_path, FileAccess.READ)
+	if f == null:
+		return
+	var parsed = JSON.parse_string(f.get_as_text())
+	if not (parsed is Dictionary):
+		return
+	var data := parsed as Dictionary
+	var houses_raw = data.get("houses", {})
+	if houses_raw is Dictionary:
+		for house_key in (houses_raw as Dictionary).keys():
+			var house_id := str(house_key)
+			var villager_id := str((houses_raw as Dictionary).get(house_key, ""))
+			if house_id.is_empty() or villager_id.is_empty():
+				continue
+			_house_occupancy[house_id] = villager_id
+			_villager_housing[villager_id] = house_id
+
+
+func _save_housing_data() -> void:
+	var payload := {
+		"version": DATA_VERSION,
+		"houses": _house_occupancy,
+	}
+	var f = FileAccess.open(housing_path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(payload, "\t"))
+
+
 func get_player_position() -> Dictionary:
 	return _player_position_cache.duplicate(true)
+
+
+func assign_villager_to_house(house_entity_id: String, villager_entity_id: String) -> bool:
+	if house_entity_id.is_empty() or villager_entity_id.is_empty():
+		return false
+
+	var old_house_for_villager := str(_villager_housing.get(villager_entity_id, ""))
+	if not old_house_for_villager.is_empty() and old_house_for_villager != house_entity_id:
+		_house_occupancy.erase(old_house_for_villager)
+
+	var old_villager_in_house := str(_house_occupancy.get(house_entity_id, ""))
+	if not old_villager_in_house.is_empty() and old_villager_in_house != villager_entity_id:
+		_villager_housing.erase(old_villager_in_house)
+
+	_house_occupancy[house_entity_id] = villager_entity_id
+	_villager_housing[villager_entity_id] = house_entity_id
+	_save_housing_data()
+	return true
+
+
+func remove_house_occupant(house_entity_id: String) -> bool:
+	if house_entity_id.is_empty():
+		return false
+	if not _house_occupancy.has(house_entity_id):
+		return false
+	var villager_entity_id := str(_house_occupancy.get(house_entity_id, ""))
+	_house_occupancy.erase(house_entity_id)
+	if not villager_entity_id.is_empty():
+		_villager_housing.erase(villager_entity_id)
+	_save_housing_data()
+	return true
+
+
+func get_house_occupant(house_entity_id: String) -> String:
+	if house_entity_id.is_empty():
+		return ""
+	return str(_house_occupancy.get(house_entity_id, ""))
+
+
+func get_villager_house(villager_entity_id: String) -> String:
+	if villager_entity_id.is_empty():
+		return ""
+	return str(_villager_housing.get(villager_entity_id, ""))
+
+
+func get_house_occupancy_snapshot() -> Dictionary:
+	return _house_occupancy.duplicate(true)
 
 
 func _chunk_key(coord: Vector2i) -> String:

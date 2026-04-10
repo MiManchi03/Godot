@@ -169,6 +169,11 @@ var _holding_villager: Node3D = null
 var _holding_villager_original_pos: Vector3 = Vector3.ZERO
 var _villager_preview: Node3D = null
 var _villager_task_ui: Control = null
+var _interact_ui_layer: CanvasLayer
+var _interact_root: Control
+var _interact_prompt_label: Label
+var _house_detail_ui: Control = null
+var _interact_target: Node3D = null
 
 const BUILDING_DEFS := [
 	{"id": "house", "label": "房屋", "emoji": "🏠", "type": VillageGenerator.BuildingType.HOUSE},
@@ -189,6 +194,8 @@ const BUILD_ROTATE_ORBIT_MAX_RADIUS_PX: float = 240.0
 const BUILD_ROTATE_ORBIT_PADDING_MIN_PX: float = 2.0
 const BUILD_ROTATE_ORBIT_PADDING_MAX_PX: float = 10.0
 const BUILD_ROTATE_ORBIT_PADDING_REF_PX: float = 140.0
+const INTERACT_RAY_LENGTH: float = 5.2
+const INTERACT_RANGE: float = 4.6
 
 func _ready() -> void:
 	print("=== PLAYER SCRIPT LOADED ===")
@@ -197,6 +204,7 @@ func _ready() -> void:
 	_setup_destroy_ui()
 	_setup_build_mode_ui()
 	_setup_villager_task_ui()
+	_setup_interact_ui()
 	_build_preview = BuildPreviewController.new()
 	add_child(_build_preview)
 	_build_village_generator = VillageGenerator.new(base_seed())
@@ -231,6 +239,47 @@ func _setup_villager_task_ui() -> void:
 	_villager_task_ui = VillagerTaskUI.new()
 	_villager_task_ui.name = "VillagerTaskUI"
 	add_child(_villager_task_ui)
+
+
+func _setup_interact_ui() -> void:
+	if _interact_ui_layer != null:
+		return
+	_interact_ui_layer = CanvasLayer.new()
+	_interact_ui_layer.name = "InteractUI"
+	add_child(_interact_ui_layer)
+
+	_interact_root = Control.new()
+	_interact_root.name = "InteractRoot"
+	_interact_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_interact_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_interact_ui_layer.add_child(_interact_root)
+
+	_interact_prompt_label = Label.new()
+	_interact_prompt_label.text = "按下 F"
+	_interact_prompt_label.visible = false
+	_interact_prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_interact_prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_interact_prompt_label.anchor_left = 0.5
+	_interact_prompt_label.anchor_top = 0.5
+	_interact_prompt_label.anchor_right = 0.5
+	_interact_prompt_label.anchor_bottom = 0.5
+	_interact_prompt_label.offset_left = -80
+	_interact_prompt_label.offset_top = -120
+	_interact_prompt_label.offset_right = 80
+	_interact_prompt_label.offset_bottom = -88
+	_interact_prompt_label.add_theme_font_size_override("font_size", 24)
+	_interact_prompt_label.modulate = Color(0.94, 0.98, 1.0, 0.98)
+	_interact_root.add_child(_interact_prompt_label)
+
+	var HouseDetailUI := load("res://scripts/ui/house_detail_ui.gd")
+	if HouseDetailUI != null:
+		_house_detail_ui = HouseDetailUI.new()
+		_house_detail_ui.name = "HouseDetailUI"
+		if _house_detail_ui.has_signal("request_assign_villager"):
+			_house_detail_ui.connect("request_assign_villager", Callable(self, "_on_house_request_assign_villager"))
+		if _house_detail_ui.has_signal("request_unassign"):
+			_house_detail_ui.connect("request_unassign", Callable(self, "_on_house_request_unassign"))
+		_interact_root.add_child(_house_detail_ui)
 
 
 func _setup_build_mode_ui() -> void:
@@ -617,6 +666,7 @@ func _physics_process(delta: float) -> void:
 	_handle_vertical_motion(delta)
 	_handle_movement(delta)
 	_update_camera_follow(delta)
+	_update_interaction_target()
 	_update_destruction(delta)
 	_update_destroy_ui_timers(delta)
 	move_and_slide()
@@ -692,6 +742,8 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if _build_mode:
+		if _interact_prompt_label:
+			_interact_prompt_label.visible = false
 		_handle_build_mode_input(event)
 		return
 
@@ -712,6 +764,11 @@ func _input(event: InputEvent) -> void:
 		_camera_drag_delta_x += motion.relative.x
 	
 	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_F:
+			if _house_detail_ui and bool(_house_detail_ui.get("visible")):
+				return
+			_try_open_interaction()
+			return
 		if event.keycode == KEY_TAB:
 			_toggle_inventory()
 		if event.keycode == KEY_F3:
@@ -724,7 +781,7 @@ func _toggle_debug_collision() -> void:
 	var world := get_node_or_null("/root/World/WorldManager")
 	if not world:
 		return
-	
+
 	var debug_areas: Array = world.get_children()
 	for chunk in debug_areas:
 		if chunk.name.begins_with("Chunk_"):
@@ -740,14 +797,182 @@ func _toggle_debug_collision() -> void:
 						debug_col.position = area.get_child(0).position
 						debug_col.modulate = Color(1, 0, 0, 0.3)
 						child.add_child(debug_col)
-					elif child is Area3D and child.get_child_count() > 0:
-						var debug_col: CollisionShape3D = CollisionShape3D.new()
-						debug_col.name = "DebugCollision"
-						debug_col.shape = child.get_child(0).shape
-						debug_col.position = child.get_child(0).position
-						debug_col.modulate = Color(1, 0, 0, 0.3)
-						child.add_child(debug_col)
+				elif child is Area3D and child.get_child_count() > 0:
+					var debug_col2: CollisionShape3D = CollisionShape3D.new()
+					debug_col2.name = "DebugCollision"
+					debug_col2.shape = child.get_child(0).shape
+					debug_col2.position = child.get_child(0).position
+					debug_col2.modulate = Color(1, 0, 0, 0.3)
+					child.add_child(debug_col2)
 	print("Debug collision toggled")
+
+
+func _update_interaction_target() -> void:
+	if _build_mode or is_destroying:
+		_set_interact_target(null)
+		return
+	if _house_detail_ui and bool(_house_detail_ui.get("visible")):
+		_set_interact_target(null)
+		return
+	if camera == null:
+		_set_interact_target(null)
+		return
+
+	var shape := SphereShape3D.new()
+	shape.radius = INTERACT_RANGE
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, global_position + Vector3(0.0, 1.0, 0.0))
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	query.collision_mask = 1
+	query.exclude = [self]
+	var hits := get_world_3d().direct_space_state.intersect_shape(query, 64)
+	if hits.is_empty():
+		_set_interact_target(null)
+		return
+
+	var best_house: Node3D = null
+	var best_d2 := INTERACT_RANGE * INTERACT_RANGE
+	for hit_variant in hits:
+		var hit := hit_variant as Dictionary
+		var collider = hit.get("collider", null)
+		var building_root := _find_building_root_from_collider(collider)
+		if building_root == null:
+			continue
+		if _resolve_build_id(building_root) != "house":
+			continue
+		var d2 := global_position.distance_squared_to(building_root.global_position)
+		if d2 <= best_d2:
+			best_d2 = d2
+			best_house = building_root
+
+	_set_interact_target(best_house)
+
+
+func _set_interact_target(target: Node3D) -> void:
+	_interact_target = target
+	if _interact_prompt_label:
+		_interact_prompt_label.visible = _interact_target != null
+
+
+func _try_open_interaction() -> void:
+	if _interact_target == null:
+		return
+	if _resolve_build_id(_interact_target) != "house":
+		return
+	_open_house_detail_for(_interact_target)
+
+
+func _open_house_detail_for(house_node: Node3D) -> void:
+	if _house_detail_ui == null or house_node == null:
+		return
+	var house_entity_id := str(house_node.get_meta("entity_id", ""))
+	if house_entity_id.is_empty():
+		house_entity_id = "house|%.3f|%.3f" % [house_node.global_position.x, house_node.global_position.z]
+		house_node.set_meta("entity_id", house_entity_id)
+
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null:
+		return
+
+	var occupant_id := ""
+	if wm.has_method("get_house_occupant"):
+		occupant_id = str(wm.call("get_house_occupant", house_entity_id))
+	var occupant_name := "无"
+	var occupant_fatigue := 0.0
+	if not occupant_id.is_empty() and wm.has_method("find_node_by_entity_id"):
+		var occ_variant = wm.call("find_node_by_entity_id", occupant_id)
+		var occ := occ_variant as Node3D
+		if occ != null:
+			occupant_name = occ.name
+			if occ.has_method("get_fatigue"):
+				occupant_fatigue = float(occ.call("get_fatigue"))
+
+	var villager_items: Array[Dictionary] = []
+	var villagers: Array[Node3D] = []
+	var villager_seen: Dictionary = {}
+	if get_tree() != null:
+		var villager_system := get_tree().get_first_node_in_group("villager_system")
+		if villager_system and villager_system.has_method("get_all_villagers"):
+			var villagers_raw = villager_system.call("get_all_villagers")
+			if villagers_raw is Array:
+				for v in (villagers_raw as Array):
+					var villager := v as Node3D
+					if villager != null and not villager_seen.has(villager.get_instance_id()):
+						villager_seen[villager.get_instance_id()] = true
+						villagers.append(villager)
+		if villagers.is_empty():
+			for v in get_tree().get_nodes_in_group("villager"):
+				var villager := v as Node3D
+				if villager != null and not villager_seen.has(villager.get_instance_id()):
+					villager_seen[villager.get_instance_id()] = true
+					villagers.append(villager)
+
+	for villager in villagers:
+		var villager_entity_id := str(villager.get_meta("entity_id", ""))
+		if villager_entity_id.is_empty() and wm.has_method("save_villager_state"):
+			wm.call("save_villager_state", villager, false)
+			villager_entity_id = str(villager.get_meta("entity_id", ""))
+		var selectable := not villager_entity_id.is_empty()
+		var villager_house := ""
+		if selectable and wm.has_method("get_villager_house"):
+			villager_house = str(wm.call("get_villager_house", villager_entity_id))
+		var occupied := not villager_house.is_empty() and villager_house != house_entity_id
+		villager_items.append({
+			"entity_id": villager_entity_id,
+			"name": villager.name,
+			"occupied": occupied,
+			"selectable": selectable,
+		})
+
+	_house_detail_ui.set_meta("house_entity_id", house_entity_id)
+	_house_detail_ui.call("open_panel", {
+		"house_entity_id": house_entity_id,
+		"house_display_name": house_node.name,
+		"occupant_entity_id": occupant_id,
+		"occupant_name": occupant_name,
+		"occupant_fatigue": occupant_fatigue,
+		"villagers": villager_items,
+	})
+
+
+func _on_house_request_assign_villager(villager_entity_id: String) -> void:
+	if _house_detail_ui == null:
+		return
+	var house_entity_id := str(_house_detail_ui.get_meta("house_entity_id", ""))
+	if house_entity_id.is_empty():
+		return
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("assign_villager_to_house"):
+		return
+	var ok := bool(wm.call("assign_villager_to_house", house_entity_id, villager_entity_id))
+	if not ok:
+		return
+	if wm.has_method("find_node_by_entity_id"):
+		var house_variant = wm.call("find_node_by_entity_id", house_entity_id)
+		var house_node := house_variant as Node3D
+		if house_node != null:
+			_open_house_detail_for(house_node)
+
+
+func _on_house_request_unassign() -> void:
+	if _house_detail_ui == null:
+		return
+	var house_entity_id := str(_house_detail_ui.get_meta("house_entity_id", ""))
+	if house_entity_id.is_empty():
+		return
+	var wm := get_node_or_null("/root/World/WorldManager")
+	if wm == null or not wm.has_method("remove_house_occupant"):
+		return
+	var ok := bool(wm.call("remove_house_occupant", house_entity_id))
+	if not ok:
+		return
+	if wm.has_method("find_node_by_entity_id"):
+		var house_variant = wm.call("find_node_by_entity_id", house_entity_id)
+		var house_node := house_variant as Node3D
+		if house_node != null:
+			_open_house_detail_for(house_node)
 
 
 func _toggle_inventory() -> void:
@@ -890,7 +1115,7 @@ func _handle_build_mode_input(event: InputEvent) -> void:
 			return
 	if event is InputEventMouseButton:
 		var mouse_event := event as InputEventMouseButton
-		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and _delete_intent != DeleteIntent.NONE and _is_point_in_delete_area(mouse_event.position):
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT and _is_delete_overlay_active() and _is_point_in_delete_area(mouse_event.position):
 			_confirm_delete_intent()
 			get_viewport().set_input_as_handled()
 			return
@@ -1748,12 +1973,13 @@ func _cancel_build_selection() -> void:
 
 
 func _update_delete_hint_visibility() -> void:
-	var active := (_delete_intent != DeleteIntent.NONE) or (_build_picked_original != null)
+	var active := _is_delete_overlay_active()
 	if _build_delete_overlay:
 		_build_delete_overlay.visible = active
 	if _build_delete_trash_label:
 		_build_delete_trash_label.visible = active
-	if active:
+	var tint_buttons := (_delete_intent != DeleteIntent.NONE) or _road_delete_confirm_pending
+	if tint_buttons:
 		for id_key in _build_buttons_by_id.keys():
 			var btn: Button = _build_buttons_by_id[id_key] as Button
 			if btn:
@@ -1764,6 +1990,10 @@ func _update_delete_hint_visibility() -> void:
 			if btn2:
 				btn2.modulate = Color(1, 1, 1, 1)
 	_refresh_build_button_highlight()
+
+
+func _is_delete_overlay_active() -> bool:
+	return (_delete_intent != DeleteIntent.NONE) or _road_delete_confirm_pending or (_build_picked_original != null)
 
 
 func _is_point_in_build_list_area(screen_pos: Vector2) -> bool:
@@ -1909,12 +2139,16 @@ func _cancel_delete_confirmation_state() -> void:
 
 
 func _confirm_delete_intent() -> void:
+	if _build_picked_original != null:
+		_finalize_picked_original()
+		_cancel_build_selection()
+		return
 	if _delete_intent == DeleteIntent.ROAD_BATCH:
 		_confirm_pending_road_delete()
 
 
 func _on_delete_overlay_input(event: InputEvent) -> void:
-	if not (_delete_intent != DeleteIntent.NONE):
+	if not _is_delete_overlay_active():
 		return
 	if not (event is InputEventMouseButton):
 		return
@@ -1925,7 +2159,7 @@ func _on_delete_overlay_input(event: InputEvent) -> void:
 
 
 func _refresh_build_button_highlight() -> void:
-	var suppress_selection := (_build_picked_original != null) or _road_delete_confirm_pending
+	var suppress_selection := _road_delete_confirm_pending
 	for id_key in _build_buttons_by_id.keys():
 		var btn: Button = _build_buttons_by_id[id_key] as Button
 		if btn == null:
