@@ -892,23 +892,58 @@ func _open_house_detail_for(house_node: Node3D) -> void:
 	var villager_items: Array[Dictionary] = []
 	var villagers: Array[Node3D] = []
 	var villager_seen: Dictionary = {}
+	var system_count := 0
+	# 计算房子所在的 chunk，用于过滤同一村庄的村民
+	var house_chunk = Vector2i(
+		floori(house_node.global_position.x / 32.0),
+		floori(house_node.global_position.z / 32.0)
+	)
+	print("[UI] house at chunk: ", house_chunk)
 	if get_tree() != null:
 		var villager_system := get_tree().get_first_node_in_group("villager_system")
 		if villager_system and villager_system.has_method("get_all_villagers"):
 			var villagers_raw = villager_system.call("get_all_villagers")
 			if villagers_raw is Array:
-				for v in (villagers_raw as Array):
+				var arr := villagers_raw as Array
+				system_count = arr.size()
+				print("[UI] villager_system count: ", system_count)
+				var filtered_count := 0
+				for v in arr:
 					var villager := v as Node3D
-					if villager != null and not villager_seen.has(villager.get_instance_id()):
-						villager_seen[villager.get_instance_id()] = true
-						villagers.append(villager)
-		if villagers.is_empty():
-			for v in get_tree().get_nodes_in_group("villager"):
-				var villager := v as Node3D
-				if villager != null and not villager_seen.has(villager.get_instance_id()):
+					if villager == null:
+						continue
+					if villager_seen.has(villager.get_instance_id()):
+						continue
+					
+					# 获取村民的 origin_chunk
+					var villager_chunk = villager.get_meta("origin_chunk", Vector2i.ZERO)
+					# 如果没有 origin_chunk，尝试从 entity_id 解析
+					if villager_chunk == Vector2i.ZERO:
+						var entity_id = villager.get_meta("entity_id", "")
+						if not entity_id.is_empty():
+							var parts = entity_id.split("|")
+							if parts.size() >= 4:
+								# entity_id 格式: seed|chunk_x|chunk_y|villager|name
+								var parsed_x = int(parts[1])
+								var parsed_y = int(parts[2])
+								villager_chunk = Vector2i(parsed_x, parsed_y)
+								print("[UI] parsed villager chunk from entity_id: ", villager_chunk, " for ", villager.name)
+					
+					print("[UI] villager ", villager.name, " origin_chunk: ", villager_chunk, " house_chunk: ", house_chunk)
+					
+					# 只保留同一 chunk 的村民
+					if villager_chunk != house_chunk:
+						continue
+					
+					filtered_count += 1
 					villager_seen[villager.get_instance_id()] = true
 					villagers.append(villager)
+				print("[UI] filtered to chunk: ", filtered_count)
+	print("[UI] final list count: ", villagers.size())
+	if system_count == 0:
+		print("[UI] system empty - no villagers registered in villager_system")
 
+	var appear_index := 1
 	for villager in villagers:
 		var villager_entity_id := str(villager.get_meta("entity_id", ""))
 		if villager_entity_id.is_empty() and wm.has_method("save_villager_state"):
@@ -919,12 +954,19 @@ func _open_house_detail_for(house_node: Node3D) -> void:
 		if selectable and wm.has_method("get_villager_house"):
 			villager_house = str(wm.call("get_villager_house", villager_entity_id))
 		var occupied := not villager_house.is_empty() and villager_house != house_entity_id
+		# 使用 entity_id 的 chunk 信息改进命名
+		var origin_chunk = villager.get_meta("origin_chunk", Vector2i.ZERO)
+		var chunk_label := ""
+		if origin_chunk != Vector2i.ZERO:
+			chunk_label = " [%d,%d]" % [origin_chunk.x, origin_chunk.y]
+		var base_name = villager.name.get_slice("_", 0) if "_" in villager.name else villager.name
 		villager_items.append({
 			"entity_id": villager_entity_id,
-			"name": villager.name,
+			"name": "%s#%d%s" % [base_name, appear_index, chunk_label],
 			"occupied": occupied,
 			"selectable": selectable,
 		})
+		appear_index += 1
 
 	_house_detail_ui.set_meta("house_entity_id", house_entity_id)
 	_house_detail_ui.call("open_panel", {
@@ -1006,6 +1048,10 @@ func _enter_build_mode() -> void:
 
 	if _build_ui_root:
 		_build_ui_root.visible = true
+	
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_method("show_village_boundaries"):
+		world_manager.call("show_village_boundaries")
 
 	if _build_zoom_slider:
 		_build_zoom_slider.set_value_no_signal(_build_camera_zoom)
@@ -1034,12 +1080,15 @@ func _exit_build_mode() -> void:
 	visible = true
 	_build_drag_map = false
 	_build_road_painting = false
+	
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager and world_manager.has_method("hide_village_boundaries"):
+		world_manager.call("hide_village_boundaries")
 	_build_road_painted_cells.clear()
 	_build_road_painted_any = false
 	_build_road_has_last_cell = false
 	_build_road_pending_cells.clear()
 	_cancel_rotate_selection(false)
-	var world_manager := get_node_or_null("/root/World/WorldManager")
 	if world_manager:
 		world_manager.call("save_player_buildings")
 	_cancel_build_selection()
@@ -1948,9 +1997,26 @@ func _select_building(build_id: String) -> void:
 	_build_selected_id = build_id
 	_refresh_build_button_highlight()
 	_spawn_build_preview()
+	
+	# 显示建筑的八边形势力范围
+	var target_building: Node3D = null
+	if _build_picked_original != null and is_instance_valid(_build_picked_original):
+		target_building = _build_picked_original
+	elif _build_preview and _build_preview.preview_root:
+		target_building = _build_preview.preview_root
+	
+	if target_building:
+		var world_manager_node = get_node_or_null("/root/World/WorldManager")
+		if world_manager_node and world_manager_node.has_method("show_building_octagon"):
+			world_manager_node.call("show_building_octagon", target_building)
 
 
 func _cancel_build_selection() -> void:
+	# 隐藏建筑的八边形势力范围
+	var world_manager_node = get_node_or_null("/root/World/WorldManager")
+	if world_manager_node and world_manager_node.has_method("hide_building_octagon"):
+		world_manager_node.call("hide_building_octagon")
+	
 	if _build_preview:
 		_build_preview.clear_preview()
 	_build_selected_id = ""

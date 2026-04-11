@@ -23,6 +23,13 @@ func register_villager(villager: Node) -> void:
 	if _villager_by_node.has(villager.get_instance_id()):
 		return
 	
+	# 基于 entity_id 的去重，防止多个 chunk 加载重复
+	var entity_id := str(villager.get_meta("entity_id", ""))
+	if not entity_id.is_empty():
+		for existing in _villagers:
+			if str(existing.get_meta("entity_id", "")) == entity_id:
+				return
+	
 	_villagers.append(villager)
 	_villager_by_node[villager.get_instance_id()] = villager
 	villager_registered.emit(villager)

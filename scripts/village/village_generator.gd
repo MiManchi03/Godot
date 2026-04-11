@@ -95,10 +95,12 @@ func try_spawn_village(parent: Node3D, chunk_coord: Vector2i, chunk_size: int, b
 
 	var scale := _pick_village_scale(rng)
 	var village := _create_scale_village(rng, scale)
+	var village_bc := _building_count_for_scale(scale, rng)
 	village.position = village_local_origin
 	parent.add_child(village)
 	_assign_entity_ids(village, chunk_coord)
 	_register_village_roads(village)
+	_spawn_villagers(parent, village, rng, village_bc, {}, [])
 	placed_villages.append(village_world_origin)
 
 
@@ -118,6 +120,7 @@ func _spawn_starter_village(parent: Node3D, chunk_coord: Vector2i) -> void:
 	parent.add_child(starter_village)
 	_assign_entity_ids(starter_village, chunk_coord)
 	_register_village_roads(starter_village)
+	_spawn_villagers(parent, starter_village, rng, 10, {}, [])
 
 	placed_villages.append(starter_world_origin)
 	starter_village_spawned = true
@@ -142,6 +145,17 @@ func _pick_village_scale(rng: RandomNumberGenerator) -> VillageScale:
 	if roll < 0.88:
 		return VillageScale.MEDIUM
 	return VillageScale.LARGE
+
+
+func _building_count_for_scale(scale: VillageScale, rng: RandomNumberGenerator) -> int:
+	match scale:
+		VillageScale.SMALL:
+			return rng.randi_range(5, 7)
+		VillageScale.MEDIUM:
+			return rng.randi_range(8, 11)
+		VillageScale.LARGE:
+			return rng.randi_range(12, 17)
+	return 6
 
 
 func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> Node3D:
@@ -194,8 +208,6 @@ func _create_scale_village(rng: RandomNumberGenerator, scale: VillageScale) -> N
 		post.position = Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
 		post.rotate_y(rng.randf_range(0.0, TAU))
 		village.add_child(post)
-
-	_spawn_villagers(village, rng, building_count, road_cells, layout_positions)
 
 	return village
 
@@ -873,7 +885,15 @@ func _generate_village_roads(village: Node3D, layout_positions: Array[Vector3], 
 		_add_road_line(village, ordered_cells[i - 1], ordered_cells[i], road_cells, type_counts)
 
 
-func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_count: int, road_cells: Dictionary, layout_positions: Array[Vector3]) -> void:
+func _register_villager_to_system(parent: Node3D, villager: Node3D) -> void:
+	if parent.get_tree() == null:
+		return
+	var villager_system = parent.get_tree().get_first_node_in_group("villager_system")
+	if villager_system and villager_system.has_method("register_villager"):
+		villager_system.call("register_villager", villager)
+
+
+func _spawn_villagers(parent: Node3D, village: Node3D, rng: RandomNumberGenerator, building_count: int, road_cells: Dictionary, layout_positions: Array[Vector3]) -> void:
 	var villager_count := mini(7, maxi(2, 2 + int(building_count / 3)))
 	for i in range(villager_count):
 		var villager := CharacterBody3D.new()
@@ -923,10 +943,10 @@ func _spawn_villagers(village: Node3D, rng: RandomNumberGenerator, building_coun
 		villager.set("building_targets", layout_positions)
 		village.add_child(villager)
 		
-		if village.get_tree() != null:
-			var villager_system = village.get_tree().get_first_node_in_group("villager_system")
-			if villager_system and villager_system.has_method("register_villager"):
-				villager_system.call("register_villager", villager)
+		if parent.is_inside_tree():
+			_register_villager_to_system(parent, villager)
+		else:
+			parent.tree_entered.connect(_register_villager_to_system.bind(parent, villager), CONNECT_ONE_SHOT)
 
 
 func _create_well() -> Node3D:

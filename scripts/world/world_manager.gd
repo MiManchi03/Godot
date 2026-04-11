@@ -1364,3 +1364,305 @@ func get_buildings_at_cell(cell: Vector2i) -> Array[Node3D]:
 			for child in node.get_children():
 				stack.append(child)
 	return result
+
+
+# ============================================================
+# 势力范围系统
+# ============================================================
+
+const VILLAGE_CONNECT_DISTANCE := 30.0
+const BUILDING_OCTAGON_SCALE := 1.5
+
+var _building_octagons: Dictionary = {}
+var _village_boundaries: Dictionary = {}
+var _building_to_village: Dictionary = {}
+var _village_boundary_meshes: Dictionary = {}
+var _building_octagon_mesh: Node3D = null
+
+
+func calculate_building_octagon(building_pos: Vector3, building_size: float) -> Array[Vector3]:
+	var vertices: Array[Vector3] = []
+	var scale := building_size * BUILDING_OCTAGON_SCALE
+	var directions := [
+		Vector3.FORWARD,
+		(Vector3.FORWARD + Vector3.RIGHT).normalized(),
+		Vector3.RIGHT,
+		(Vector3.RIGHT + Vector3.BACK).normalized(),
+		Vector3.BACK,
+		(Vector3.BACK + Vector3.LEFT).normalized(),
+		Vector3.LEFT,
+		(Vector3.LEFT + Vector3.FORWARD).normalized(),
+	]
+	for dir in directions:
+		vertices.append(building_pos + dir * scale)
+	return vertices
+
+
+func calculate_building_size(building: Node3D) -> float:
+	# 方法1：尝试从直接子节点获取 MeshInstance3D
+	var mesh_instance := building.get_node_or_null("MeshInstance3D")
+	if mesh_instance == null:
+		# 方法2：递归查找第一个 MeshInstance3D
+		for child in building.get_children():
+			if child is MeshInstance3D:
+				mesh_instance = child as MeshInstance3D
+				break
+	
+	if mesh_instance and mesh_instance.mesh:
+		var mesh = mesh_instance.mesh
+		var result := 0.0
+		
+		# BoxMesh 使用 get_size()
+		if mesh is BoxMesh:
+			var size: Vector3 = mesh.get_size()
+			result = maxf(size.x, size.z)
+		# CylinderMesh 使用 top_radius * 2
+		elif mesh is CylinderMesh:
+			result = mesh.top_radius * 2.0
+		# SphereMesh 使用 radius * 2
+		elif mesh is SphereMesh:
+			result = mesh.radius * 2.0
+		# PrismMesh 使用 get_size()
+		elif mesh is PrismMesh:
+			var size: Vector3 = mesh.get_size()
+			result = maxf(size.x, size.z)
+		# CapsuleMesh 使用 radius * 2
+		elif mesh is CapsuleMesh:
+			result = mesh.radius * 2.0
+		# 其他情况使用默认值
+		else:
+			result = 0.0
+		
+		if result > 0:
+			return result
+	
+	# 方法3：从 CollisionObject3D 获取 AABB
+	if building is CollisionObject3D:
+		var building_aabb: AABB = (building as CollisionObject3D).get_aabb()
+		var result := maxf(building_aabb.size.x, building_aabb.size.z)
+		if result > 0:
+			return result
+	
+	# 方法4：使用默认值
+	return 3.0
+
+
+func find_villages_by_connectivity(buildings: Array, max_distance: float = VILLAGE_CONNECT_DISTANCE) -> Array[Array]:
+	if buildings.is_empty():
+		return []
+	
+	var visited: Dictionary = {}
+	var components: Array[Array] = []
+	
+	for building in buildings:
+		if visited.has(building):
+			continue
+		var component: Array[Node3D] = []
+		var queue: Array[Node3D] = [building]
+		while not queue.is_empty():
+			var current: Node3D = queue.pop_front()
+			if visited.has(current):
+				continue
+			visited[current] = true
+			component.append(current)
+			for other in buildings:
+				if visited.has(other):
+					continue
+				var dist := current.global_position.distance_to(other.global_position)
+				if dist <= max_distance:
+					queue.append(other)
+		if not component.is_empty():
+			components.append(component)
+	return components
+
+
+func get_village_boundary(building_list: Array[Node3D]) -> Array[Vector3]:
+	if building_list.is_empty():
+		return []
+	
+	var all_vertices: Array[Vector3] = []
+	for building in building_list:
+		var building_pos := building.global_position
+		var building_size := calculate_building_size(building)
+		var octagon := calculate_building_octagon(building_pos, building_size)
+		all_vertices.append_array(octagon)
+	
+	if all_vertices.is_empty():
+		return []
+	
+	if all_vertices.size() == 1:
+		return all_vertices
+	
+	var sorted_points := _graham_scan(all_vertices)
+	return sorted_points
+
+
+func _graham_scan(points: Array[Vector3]) -> Array[Vector3]:
+	if points.size() < 3:
+		return points
+	
+	var sorted := points.duplicate()
+	sorted.sort_custom(func(a: Vector3, b: Vector3) -> bool:
+		if a.x != b.x:
+			return a.x < b.x
+		return a.z < b.z
+	)
+	
+	var p0 = sorted[0]
+	sorted.remove_at(0)
+	sorted.sort_custom(func(a: Vector3, b: Vector3) -> bool:
+		var cross = (a.x - p0.x) * (b.z - p0.z) - (b.x - p0.x) * (a.z - p0.z)
+		if cross != 0:
+			return cross < 0
+		return a.distance_to(p0) < b.distance_to(p0)
+	)
+	
+	var hull: Array[Vector3] = []
+	for point in sorted:
+		while hull.size() >= 2:
+			var p1 = hull[hull.size() - 2]
+			var p2 = hull[hull.size() - 1]
+			var cross = (p2.x - p1.x) * (point.z - p1.z) - (p2.z - p1.z) * (point.x - p1.x)
+			if cross <= 0:
+				hull.remove_at(hull.size() - 1)
+			else:
+				break
+		hull.append(point)
+	
+	for i in range(sorted.size() - 1, -1, -1):
+		while hull.size() >= 2:
+			var p1 = hull[hull.size() - 2]
+			var p2 = hull[hull.size() - 1]
+			var cross = (p2.x - p1.x) * (sorted[i].z - p1.z) - (p2.z - p1.z) * (sorted[i].x - p1.x)
+			if cross <= 0:
+				hull.remove_at(hull.size() - 1)
+			else:
+				break
+		hull.append(sorted[i])
+	
+	if hull.size() > 1:
+		hull.remove_at(hull.size() - 1)
+	
+	return hull
+
+
+func rebuild_all_village_boundaries() -> void:
+	_village_boundaries.clear()
+	_building_to_village.clear()
+	
+	var buildings: Array[Node3D] = []
+	for chunk_root in loaded_chunks.values():
+		if chunk_root == null:
+			continue
+		var queue: Array[Node] = [chunk_root]
+		while not queue.is_empty():
+			var node: Node = queue.pop_front()
+			if node is Node3D:
+				var build_id := _resolve_build_id(node as Node3D)
+				if not build_id.is_empty() and build_id != "road":
+					buildings.append(node as Node3D)
+			for child in node.get_children():
+				queue.append(child)
+	
+	var villages := find_villages_by_connectivity(buildings, VILLAGE_CONNECT_DISTANCE)
+	for i in range(villages.size()):
+		var village_buildings = villages[i]
+		var boundary = get_village_boundary(village_buildings)
+		var village_id := "village_%d" % i
+		_village_boundaries[village_id] = boundary
+		for building in village_buildings:
+			var ent_id := _resolve_build_id(building)
+			if not ent_id.is_empty():
+				_building_to_village[ent_id] = village_id
+	
+	print("[VILLAGE] Found %d villages with %d buildings total" % [villages.size(), buildings.size()])
+
+
+func show_village_boundaries() -> void:
+	if _village_boundaries.is_empty():
+		rebuild_all_village_boundaries()
+	
+	hide_village_boundaries()
+	
+	for village_id in _village_boundaries.keys():
+		var boundary = _village_boundaries[village_id]
+		if boundary.is_empty():
+			continue
+		var mesh = _create_boundary_mesh(boundary)
+		if mesh:
+			mesh.name = "VillageBoundary_" + str(village_id)
+			add_child(mesh)
+			_village_boundary_meshes[village_id] = mesh
+
+
+func hide_village_boundaries() -> void:
+	for mesh in _village_boundary_meshes.values():
+		if mesh:
+			mesh.queue_free()
+	_village_boundary_meshes.clear()
+
+
+func _create_boundary_mesh(vertices: Array[Vector3]) -> Node3D:
+	if vertices.size() < 3:
+		return null
+	
+	var root := Node3D.new()
+	
+	for i in range(vertices.size()):
+		var start = vertices[i]
+		var end = vertices[(i + 1) % vertices.size()]
+		var segment = _create_line_segment(start, end)
+		root.add_child(segment)
+	
+	return root
+
+
+func _create_line_segment(start: Vector3, end: Vector3) -> Node3D:
+	var mesh_inst := MeshInstance3D.new()
+	var immediate_mesh := ImmediateMesh.new()
+	
+	immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
+	immediate_mesh.surface_add_vertex(start)
+	immediate_mesh.surface_add_vertex(end)
+	immediate_mesh.surface_end()
+	
+	mesh_inst.mesh = immediate_mesh
+	
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(0.2, 1.0, 0.3, 1.0)
+	material.emission_enabled = true
+	material.emission = Color(0.2, 1.0, 0.3)
+	material.emission_energy_multiplier = 2.0
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	
+	mesh_inst.material_override = material
+	return mesh_inst
+
+
+func show_building_octagon(building: Node3D) -> void:
+	hide_building_octagon()
+	if building == null:
+		return
+	
+	var building_size := calculate_building_size(building)
+	if building_size <= 0:
+		return
+	
+	# 使用建筑相对于原点计算八边形顶点（局部坐标）
+	var octagon := calculate_building_octagon(Vector3.ZERO, building_size)
+	if octagon.is_empty():
+		return
+	
+	var mesh = _create_boundary_mesh(octagon)
+	if mesh:
+		mesh.name = "BuildingOctagon"
+		mesh.add_to_group("building_octagon")
+		# 添加为建筑的子节点，自动跟随建筑移动
+		building.add_child(mesh)
+		_building_octagon_mesh = mesh
+
+
+func hide_building_octagon() -> void:
+	if _building_octagon_mesh:
+		_building_octagon_mesh.queue_free()
+		_building_octagon_mesh = null
