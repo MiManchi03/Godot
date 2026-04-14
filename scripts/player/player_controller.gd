@@ -17,7 +17,6 @@ extends CharacterBody3D
 @export var camera_mouse_follow_strength: float = 0.45
 
 @onready var camera: Camera3D = $Camera3D
-
 var is_sprinting: bool = false
 var last_forward_tap_time: float = -10.0
 var base_camera_fov: float = 75.0
@@ -1619,7 +1618,9 @@ func _finalize_picked_original() -> void:
 	_build_mode_has_changes = true
 	if _build_picked_original_build_id == "road" and is_instance_valid(_build_picked_original):
 		_build_picked_original.set_meta("picked_hidden", false)
-	_build_picked_original.queue_free()
+		_build_picked_original.queue_free()
+	# Hide influence octagon when finalizing pickup (placing or cancelling)
+	world_manager.call("hide_building_octagon")
 	_clear_picked_original()
 	_update_delete_hint_visibility()
 
@@ -1639,6 +1640,10 @@ func _restore_picked_original() -> void:
 		if world_manager and world_manager.has_method("cancel_pickup_road"):
 			world_manager.call("cancel_pickup_road", _build_picked_original)
 	_build_picked_original.visible = true
+	# Hide influence octagon when restoring pickup (cancelling)
+	var world_manager := get_node_or_null("/root/World/WorldManager")
+	if world_manager:
+		world_manager.call("hide_building_octagon")
 	_clear_picked_original()
 	_update_delete_hint_visibility()
 
@@ -1902,7 +1907,9 @@ func _confirm_rotate_selection() -> void:
 			bool(_build_rotating_target.get_meta("player_placed", false)),
 			str(_build_rotating_target.get_meta("entity_id", ""))
 		)
-		world_manager.call("add_player_building", build_id, _build_rotating_target.global_position, _build_rotating_target.rotation.y, _build_rotating_target.name, int(_build_rotating_target.get_meta("variant_seed", 0)))
+		world_manager.call("add_player_building", _build_selected_id, _build_rotating_target.global_position, _build_rotating_target.rotation.y, _build_rotating_target.name, int(_build_rotating_target.get_meta("variant_seed", 0)))
+	world_manager.call("show_building_influence", _build_selected_id, _build_rotating_target.global_position)
+	world_manager.call("show_building_octagon", _build_rotating_target)
 	_cancel_rotate_selection(false)
 
 
@@ -2008,6 +2015,7 @@ func _select_building(build_id: String) -> void:
 	if target_building:
 		var world_manager_node = get_node_or_null("/root/World/WorldManager")
 		if world_manager_node and world_manager_node.has_method("show_building_octagon"):
+			print("[DEBUG] _select_building calling show_building_octagon, target: ", target_building)
 			world_manager_node.call("show_building_octagon", target_building)
 
 
@@ -2475,7 +2483,12 @@ func _try_pick_existing_building_to_preview() -> bool:
 						_build_preview.preview_root.global_position = picked_pos
 						_build_preview.preview_rotation_deg = rad_to_deg(picked_rot)
 						_build_preview.preview_root.rotation.y = picked_rot
-						return true
+					# Show influence octagon for picked up building
+					var world_manager := get_node_or_null("/root/World/WorldManager")
+					if world_manager:
+						print("[DEBUG] Calling show_building_octagon for road, preview: ", _build_preview.preview_root)
+						world_manager.call("show_building_octagon", _build_preview.preview_root)
+					return true
 			# 该格标记为道路但没有有效节点：先自愈，避免误删到别的道路
 			if world_manager_node.has_method("has_road_cell") and bool(world_manager_node.call("has_road_cell", road_cell)):
 				if world_manager_node.has_method("reconcile_road_state"):
@@ -2562,6 +2575,11 @@ func _try_pick_existing_building_to_preview() -> bool:
 		_build_preview.preview_root.global_position = picked_pos
 		_build_preview.preview_rotation_deg = rad_to_deg(picked_rot)
 		_build_preview.preview_root.rotation.y = picked_rot
+		# Show influence octagon for picked up building
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager:
+			print("[DEBUG] Calling show_building_octagon for building, preview: ", _build_preview.preview_root)
+			world_manager.call("show_building_octagon", _build_preview.preview_root)
 		if BUILD_PICK_DEBUG:
 			print("[BUILD_PICK] success: picked and converted to preview")
 		return true
@@ -2785,6 +2803,11 @@ func _update_build_preview() -> void:
 	if _build_preview == null:
 		return
 	_build_preview.update_preview(camera, _build_selected_id)
+	# Update building octagon position if it exists
+	if _build_preview.preview_root:
+		var world_manager := get_node_or_null("/root/World/WorldManager")
+		if world_manager and world_manager.has_method("update_building_octagon_position"):
+			world_manager.call("update_building_octagon_position", _build_preview.preview_root.global_position)
 
 
 func _try_place_building() -> void:
