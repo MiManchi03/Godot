@@ -44,7 +44,13 @@ def main() -> int:
         "-gdir=res://tests/unit", "-gexit",
     ]
     print(f"🧪 运行 GUT：{godot}")
-    result = subprocess.run(cmd, text=True, encoding="utf-8", errors="replace")
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    if result.stdout:
+        sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
     if result.returncode != 0:
         print(f"❌ 单元测试失败（exit={result.returncode}）")
         return 1
