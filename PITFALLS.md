@@ -33,3 +33,13 @@
 ### gdtoolkit 对超大脚本会耗尽资源
 - 现象：`world_manager.gd` 达 84 MB，全量 gdlint 会卡住
 - 现状：[自动] `run_gdlint.py` 跳过 > 1 MB 的脚本并给出提示
+
+### 契约长期失修（14 处腐烂）
+- 现象：`contract.json` 声明的方法 / 枚举早已从脚本移除，长期无人发现
+- 处置：Phase 5 引入 `validate_contracts.py` 并清理 14 处；`resource_spawner` 契约目录错位已纠正
+- 现状：[自动] pre-commit 与 verify.sh 每次都比对契约与实现一致
+
+### 契约不得声明尚未提交的接口
+- 现象：`villager_system` 契约声明了 `get_villager_by_entity_id`，该方法仅存在于未提交 WIP，pre-commit 暂存后比对失败
+- 处置：先移除该声明，待 WIP 落地后补回
+- 现状：半自动（需人工在 WIP 提交时同步契约）
