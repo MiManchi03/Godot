@@ -38,88 +38,12 @@
       ],
       "return": "void",
       "description": "从系统注销村民"
-    },
-    {
-      "name": "get_villager_by_entity_id",
-      "params": [
-        {
-          "name": "entity_id",
-          "type": "String"
-        }
-      ],
-      "return": "Node3D",
-      "description": "根据实体ID获取村民节点"
-    },
-    {
-      "name": "assign_task_to_villager",
-      "params": [
-        {
-          "name": "villager_entity_id",
-          "type": "String"
-        },
-        {
-          "name": "task_type",
-          "type": "String"
-        },
-        {
-          "name": "target_entity_id",
-          "type": "String"
-        }
-      ],
-      "return": "bool",
-      "description": "给村民分配任务"
-    },
-    {
-      "name": "remove_villager_task",
-      "params": [
-        {
-          "name": "villager_entity_id",
-          "type": "String"
-        }
-      ],
-      "return": "bool",
-      "description": "移除村民当前任务"
-    },
-    {
-      "name": "get_villager_task",
-      "params": [
-        {
-          "name": "villager_entity_id",
-          "type": "String"
-        }
-      ],
-      "return": "Dictionary",
-      "description": "获取村民当前任务信息"
-    },
-    {
-      "name": "snapshot_all_villagers",
-      "params": [
-        {
-          "name": "force",
-          "type": "bool"
-        }
-      ],
-      "return": "void",
-      "description": "快照所有村民状态到世界状态"
-    },
-    {
-      "name": "save_villager_state",
-      "params": [
-        {
-          "name": "villager",
-          "type": "Node3D"
-        },
-        {
-          "name": "force",
-          "type": "bool"
-        }
-      ],
-      "return": "void",
-      "description": "保存单个村民状态"
     }
   ],
   "exports": [],
   "constants": [],
   "enums": [],
-  "groups": ["villager_system"]
+  "groups": [
+    "villager_system"
+  ]
 }

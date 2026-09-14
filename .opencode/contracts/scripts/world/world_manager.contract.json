@@ -101,12 +101,6 @@
       "description": "确保村民系统已初始化"
     },
     {
-      "name": "get_loaded_chunks",
-      "params": [],
-      "return": "Dictionary",
-      "description": "获取已加载的区块字典"
-    },
-    {
       "name": "has_road_cell",
       "params": [
         {
@@ -153,59 +147,6 @@
       ],
       "return": "Node3D",
       "description": "根据实体ID查找节点"
-    },
-    {
-      "name": "get_house_occupant",
-      "params": [
-        {
-          "name": "house_entity_id",
-          "type": "String",
-          "description": "房屋实体ID"
-        }
-      ],
-      "return": "String",
-      "description": "获取房屋居住者实体ID"
-    },
-    {
-      "name": "assign_villager_to_house",
-      "params": [
-        {
-          "name": "house_entity_id",
-          "type": "String",
-          "description": "房屋实体ID"
-        },
-        {
-          "name": "villager_entity_id",
-          "type": "String",
-          "description": "村民实体ID"
-        }
-      ],
-      "return": "bool",
-      "description": "分配村民到房屋"
-    },
-    {
-      "name": "remove_house_occupant",
-      "params": [
-        {
-          "name": "house_entity_id",
-          "type": "String",
-          "description": "房屋实体ID"
-        }
-      ],
-      "return": "bool",
-      "description": "移除房屋居住者"
-    },
-    {
-      "name": "get_villager_house",
-      "params": [
-        {
-          "name": "villager_entity_id",
-          "type": "String",
-          "description": "村民实体ID"
-        }
-      ],
-      "return": "String",
-      "description": "获取村民所属房屋实体ID"
     },
     {
       "name": "save_villager_state",
@@ -295,24 +236,7 @@
       "description": "玩家备用Y坐标"
     }
   ],
-  "enums": [
-    {
-      "name": "BuildingType",
-      "values": [
-        "HOUSE",
-        "WORKSHOP",
-        "WAREHOUSE",
-        "MARKET",
-        "WELL",
-        "CAMPFIRE",
-        "FENCE_POST",
-        "ROAD",
-        "FARM",
-        "TOWER",
-        "BARRACK"
-      ]
-    }
-  ],
+  "enums": [],
   "groups": [
     "world_manager"
   ]

@@ -95,6 +95,28 @@ repos:
         verbose: true
         stages: [commit]
 
+      # save schema 守卫：读写键对称 + 版本迁移
+      # 追溯：红队演练 D6（改写出键不写迁移，未被拦截）
+      - id: save-schema-check
+        name: Save Schema Guard
+        entry: python tools/check_save_schema.py
+        language: system
+        files: '^scripts/world/world_state\.gd$'
+        pass_filenames: false
+        verbose: true
+        stages: [commit]
+
+      # 契约校验：contract.json 声明的接口必须仍在脚本中存在
+      # 追溯：审计 A8（契约腐烂）/ A12（原实现缺失）
+      - id: contracts-check
+        name: Contract Validation
+        entry: python tools/validate_contracts.py
+        language: system
+        files: '(\.opencode/contracts/.*\.json$|\.gd$)'
+        pass_filenames: false
+        verbose: true
+        stages: [commit]
+
       # （已由 gdtoolkit + GUT 取代）原 godot --check-only 方案作废
       # - id: godot-static-analyzer
       #   name: GDScript Static Analysis

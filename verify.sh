@@ -48,6 +48,8 @@ else
 fi
 
 run "依赖白名单" "$PY" tools/check_dependencies.py
+run "契约校验" "$PY" tools/validate_contracts.py
+run "存档 schema" "$PY" tools/check_save_schema.py
 run "静态分析 gdlint" "$PY" tools/run_gdlint.py
 
 run "单元测试 GUT" "$PY" tools/run_tests.py

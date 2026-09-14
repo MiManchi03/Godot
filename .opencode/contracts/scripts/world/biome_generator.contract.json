@@ -14,36 +14,6 @@
       ],
       "return": "void",
       "description": "初始化生成器种子"
-    },
-    {
-      "name": "get_biome_at",
-      "params": [
-        {
-          "name": "world_x",
-          "type": "float"
-        },
-        {
-          "name": "world_z",
-          "type": "float"
-        }
-      ],
-      "return": "Biome",
-      "description": "获取指定世界坐标的群系类型"
-    },
-    {
-      "name": "get_height_at",
-      "params": [
-        {
-          "name": "world_x",
-          "type": "float"
-        },
-        {
-          "name": "world_z",
-          "type": "float"
-        }
-      ],
-      "return": "float",
-      "description": "获取指定坐标的地形高度"
     }
   ],
   "exports": [],
@@ -51,7 +21,12 @@
   "enums": [
     {
       "name": "Biome",
-      "values": ["PLAINS", "FOREST", "HILLS", "MOUNTAINS"]
+      "values": [
+        "PLAINS",
+        "FOREST",
+        "HILLS",
+        "MOUNTAINS"
+      ]
     }
   ],
   "groups": []

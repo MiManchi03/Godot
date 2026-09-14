@@ -73,25 +73,25 @@
         }
       ],
       "return": "Node3D",
-      "description": "创建资源节点实例"
+      "description": "生成资源实例"
     },
     {
       "name": "_create_tree",
       "params": [],
       "return": "Node3D",
-      "description": "创建树木实例（StaticBody3D + 碰撞体 + 可破坏区域）"
+      "description": "生成树木实例（StaticBody3D + 碰撞体 + 可破坏范围）"
     },
     {
       "name": "_create_rock",
       "params": [],
       "return": "Node3D",
-      "description": "创建石头实例（StaticBody3D + 碰撞体 + 可破坏区域）"
+      "description": "生成石头实例（StaticBody3D + 碰撞体 + 可破坏范围）"
     },
     {
       "name": "_create_grass",
       "params": [],
       "return": "Node3D",
-      "description": "创建草丛实例（Area3D + 可破坏区域，无物理碰撞体）"
+      "description": "生成草丛实例（Area3D + 可破坏范围，无物理碰撞体）"
     },
     {
       "name": "_chunk_seed",
@@ -113,7 +113,7 @@
         }
       ],
       "return": "StandardMaterial3D",
-      "description": "创建标准材质"
+      "description": "生成标准材质"
     }
   ],
   "exports": [],

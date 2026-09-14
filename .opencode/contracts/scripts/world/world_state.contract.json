@@ -1,0 +1,151 @@
+{
+  "class": "WorldState",
+  "extends": "RefCounted",
+  "description": "世界运行时状态（持久化）",
+  "signals": [],
+  "methods": [
+    {
+      "name": "tick",
+      "params": [
+        { "name": "delta", "type": "float", "description": "帧时间增量" }
+      ],
+      "return": "void",
+      "description": "每帧推进，触发自动保存"
+    },
+    {
+      "name": "get_chunk_data",
+      "params": [
+        { "name": "coord", "type": "Vector2i", "description": "区块坐标" }
+      ],
+      "return": "Dictionary",
+      "description": "取得区块数据（含缓存）"
+    },
+    {
+      "name": "add_player_building",
+      "params": [
+        { "name": "build_id", "type": "String", "description": "建筑标识" },
+        { "name": "world_pos", "type": "Vector3", "description": "世界坐标" },
+        { "name": "rotation_y", "type": "float", "description": "绕 Y 轴旋转" },
+        { "name": "node_name", "type": "String", "description": "名字" },
+        { "name": "variant_seed", "type": "int", "description": "变体种子" }
+      ],
+      "return": "void",
+      "description": "登记玩家放置的建筑"
+    },
+    {
+      "name": "remove_added_player",
+      "params": [
+        { "name": "build_id", "type": "String", "description": "建筑标识" },
+        { "name": "world_pos", "type": "Vector3", "description": "世界坐标" },
+        { "name": "node_name", "type": "String", "description": "名字" }
+      ],
+      "return": "bool",
+      "description": "移除玩家已放置建筑的登记"
+    },
+    {
+      "name": "add_removed_original",
+      "params": [
+        { "name": "build_id", "type": "String", "description": "建筑标识" },
+        { "name": "world_pos", "type": "Vector3", "description": "世界坐标" },
+        { "name": "node_name", "type": "String", "description": "名字" },
+        { "name": "entity_id", "type": "String", "description": "对象标识" }
+      ],
+      "return": "void",
+      "description": "登记被移除的原始建筑"
+    },
+    {
+      "name": "add_destroyed_resource",
+      "params": [
+        { "name": "destruct_type", "type": "String", "description": "破坏类型" },
+        { "name": "world_pos", "type": "Vector3", "description": "世界坐标" },
+        { "name": "entity_id", "type": "String", "description": "对象标识" }
+      ],
+      "return": "void",
+      "description": "登记被破坏的资源"
+    },
+    {
+      "name": "upsert_villager_state",
+      "params": [
+        { "name": "entity_id", "type": "String", "description": "对象标识" },
+        { "name": "world_pos", "type": "Vector3", "description": "世界坐标" },
+        { "name": "rotation_y", "type": "float", "description": "绕 Y 轴旋转" },
+        { "name": "task_start_id", "type": "String", "description": "任务起点" },
+        { "name": "task_end_id", "type": "String", "description": "任务终点" },
+        { "name": "carrying_item", "type": "bool", "description": "是否携带物品" },
+        { "name": "task_state", "type": "int", "description": "任务状态" },
+        { "name": "origin_chunk", "type": "Vector2i", "description": "来源区块" }
+      ],
+      "return": "void",
+      "description": "写入或更新村民状态快照"
+    },
+    {
+      "name": "save_dirty",
+      "params": [
+        { "name": "force", "type": "bool", "description": "是否强制落盘" }
+      ],
+      "return": "void",
+      "description": "按脏标记落盘"
+    },
+    {
+      "name": "save_player_position",
+      "params": [
+        { "name": "pos_data", "type": "Dictionary", "description": "位置数据" }
+      ],
+      "return": "void",
+      "description": "写入玩家位置"
+    },
+    {
+      "name": "get_player_position",
+      "params": [],
+      "return": "Dictionary",
+      "description": "读取玩家位置"
+    },
+    {
+      "name": "assign_villager_to_house",
+      "params": [
+        { "name": "house_entity_id", "type": "String", "description": "建筑对象标识" },
+        { "name": "villager_entity_id", "type": "String", "description": "村民对象标识" }
+      ],
+      "return": "bool",
+      "description": "分配村民到建筑"
+    },
+    {
+      "name": "remove_house_occupant",
+      "params": [
+        { "name": "house_entity_id", "type": "String", "description": "建筑对象标识" }
+      ],
+      "return": "bool",
+      "description": "移除建筑的居住者"
+    },
+    {
+      "name": "get_house_occupant",
+      "params": [
+        { "name": "house_entity_id", "type": "String", "description": "建筑对象标识" }
+      ],
+      "return": "String",
+      "description": "取得建筑居住者"
+    },
+    {
+      "name": "get_villager_house",
+      "params": [
+        { "name": "villager_entity_id", "type": "String", "description": "村民对象标识" }
+      ],
+      "return": "String",
+      "description": "取得村民所属建筑"
+    },
+    {
+      "name": "get_house_occupancy_snapshot",
+      "params": [],
+      "return": "Dictionary",
+      "description": "取得居住关系快照"
+    }
+  ],
+  "exports": [],
+  "constants": [
+    { "name": "DATA_VERSION", "value": 2, "description": "save 数据版本号" },
+    { "name": "AUTOSAVE_INTERVAL", "value": 3.0, "description": "自动保存间隔（秒）" },
+    { "name": "INVALID_CHUNK_COORD", "value": "Vector2i(1<<30,1<<30)", "description": "无效区块坐标哨兵" }
+  ],
+  "enums": [],
+  "groups": []
+}
