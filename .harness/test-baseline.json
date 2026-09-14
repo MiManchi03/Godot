@@ -1,0 +1,19 @@
+{
+  "tests/unit/test_biome_generator.gd::test_biome_name_mapping": "pass",
+  "tests/unit/test_biome_generator.gd::test_get_biome_deterministic": "pass",
+  "tests/unit/test_biome_generator.gd::test_get_biome_returns_valid_enum": "pass",
+  "tests/unit/test_boundary.gd::test_attempt_count_unknown_biome_default": "pass",
+  "tests/unit/test_boundary.gd::test_biome_name_out_of_range": "pass",
+  "tests/unit/test_boundary.gd::test_get_biome_extreme_coords_no_crash": "pass",
+  "tests/unit/test_boundary.gd::test_pick_resource_type_always_returns_known": "pass",
+  "tests/unit/test_boundary.gd::test_world_state_empty_ids_no_crash": "pass",
+  "tests/unit/test_resource_spawner.gd::test_attempt_count_per_biome": "pass",
+  "tests/unit/test_resource_spawner.gd::test_forest_distribution_matches_spec": "pass",
+  "tests/unit/test_resource_spawner.gd::test_hills_distribution_matches_spec": "pass",
+  "tests/unit/test_resource_spawner.gd::test_plains_distribution_matches_spec": "pass",
+  "tests/unit/test_world_state.gd::test_assign_and_query_occupancy": "pass",
+  "tests/unit/test_world_state.gd::test_assign_rejects_empty_ids": "pass",
+  "tests/unit/test_world_state.gd::test_reassign_moves_villager": "pass",
+  "tests/unit/test_world_state.gd::test_remove_absent_house_returns_false": "pass",
+  "tests/unit/test_world_state.gd::test_remove_occupancy": "pass"
+}

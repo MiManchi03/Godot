@@ -38,10 +38,15 @@ def main() -> int:
         print("❌ 未找到 Godot 可执行文件；请设置 GODOT_PATH 环境变量")
         return 1
 
+    # 生成 JUnit XML 作为「完成取证」的测试产物（供 claims-check / 回归守护使用）
+    junit_dir = Path("test-results")
+    junit_dir.mkdir(parents=True, exist_ok=True)
+
     cmd = [
         godot, "--headless", "--path", ".",
         "-s", "addons/gut/gut_cmdln.gd",
         "-gdir=res://tests/unit", "-gexit",
+        "-gjunit_xml_file=res://test-results/junit.xml",
     ]
     print(f"🧪 运行 GUT：{godot}")
     result = subprocess.run(

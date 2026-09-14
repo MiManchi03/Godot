@@ -53,6 +53,8 @@ run "存档 schema" "$PY" tools/check_save_schema.py
 run "静态分析 gdlint" "$PY" tools/run_gdlint.py
 
 run "单元测试 GUT" "$PY" tools/run_tests.py
+run "回归守护" "$PY" tools/regression_guard.py
+run "性能基准" "$PY" tools/benchmark.py
 
 echo "=================================="
 if [ "$FAIL" -eq 0 ]; then
