@@ -24,12 +24,12 @@ jobs:
           python -c "
           import re
           import sys
-          
+
           with open('HARNESS_PLAN.md', 'r', encoding='utf-8') as f:
               content = f.read()
-          
+
           errors = []
-          
+
           # 必需章节检查
           required_sections = [
               '🎯 项目目标',
@@ -38,35 +38,35 @@ jobs:
               '📋 待办事项',
               '🚫 明确拒绝/已排除'
           ]
-          
+
           for section in required_sections:
               if f'## {section}' not in content:
                   errors.append(f'缺少必需章节: {section}')
-          
+
           # 决策记录格式检查
           decision_pattern = r'### \[\\d{4}-\\d{2}-\\d{2}\] .+'
           decisions = re.findall(decision_pattern, content)
           if not decisions:
               errors.append('未找到有效的决策记录格式 (应为: ### [YYYY-MM-DD] 标题)')
-          
+
           # 任务格式检查
           task_pattern = r'### \[任务\] .+'
           tasks = re.findall(task_pattern, content)
-          
+
           # 待办格式检查
           todo_pattern = r'- \[ \] .+'
           todos = re.findall(todo_pattern, content)
-          
+
           # 拒绝项格式检查
           reject_pattern = r'- ❌ .+（原因: .+）'
           rejects = re.findall(reject_pattern, content)
-          
+
           if errors:
               print('❌ HARNESS_PLAN.md 格式错误:')
               for e in errors:
                   print(f'  - {e}')
               sys.exit(1)
-          
+
           print('✅ HARNESS_PLAN.md 格式验证通过')
           print(f'  决策记录: {len(decisions)} 条')
           print(f'  进行中任务: {len(tasks)} 个')
@@ -95,6 +95,7 @@ jobs:
               echo "$CHANGED_FILES"
               echo ""
               echo "建议: 请同步更新 HARNESS_PLAN.md 记录决策/任务"
-              # 不阻断，仅警告
+              echo "❌ 代码变更未同步 HARNESS_PLAN.md，阻断（Phase 3 起）"
+              exit 1
             fi
           fi

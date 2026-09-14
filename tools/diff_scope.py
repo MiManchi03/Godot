@@ -44,3 +44,15 @@ def get_added_lines(files: List[Path]) -> Dict[str, Set[int]]:
                 cur += 1
         added[str(f)] = lines
     return added
+
+
+def get_staged_files() -> List[str]:
+    """返回暂存区新增/修改的文件相对路径列表（POSIX 分隔）"""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=True
+        )
+    except Exception:
+        return []
+    return [l.strip() for l in (result.stdout or "").splitlines() if l.strip()]

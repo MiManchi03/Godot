@@ -53,9 +53,12 @@ You are a Godot 4.x game engineer. Follow Harness methodology:
 
 ---
 
-## 会话启动协议
+## 会话启动协议（开工仪式）
 
-每次会话开始（包括上下文压缩后），**必须**先执行：
+每次会话开始（包括上下文压缩后），**必须**按序执行：
+1. 读 `STATUS.md`（当前 Phase / 进行中 / 阻塞）
+2. 读 `PITFALLS.md`（历史教训，避免重复犯错）
+3. 读 `HARNESS_PLAN.md`（决策与任务长期记忆）
 ```python
 plan = skill("godot-plan-manager").read()
 # 或获取摘要
@@ -141,6 +144,15 @@ skill("godot-plan-manager").append_decision(
 
 ---
 
+## 完成取证协议（硬性 · 不可跳过）
+
+在宣称"完成 / 通过 / 已修复"之前，**必须**粘贴本次真实命令输出（测试、构建、校验）。
+- 禁止口头断言：没有真实输出即视为**未完成**。
+- 禁止编造测试数字或覆盖率数字；一经发现按 D5 记入 `PITFALLS.md`。
+- 追溯：红队演练 D5（虚假测试声明，0/7 未被拦截）；审计 M5（诚实条款缺失）
+
+---
+
 ## Harness 核心原则
 
 1. **规格先行**：先更新 SPEC.md 验收标准，再写代码
@@ -149,3 +161,4 @@ skill("godot-plan-manager").append_decision(
 4. **验证前置**：写代码前先跑验证，不通过不写
 5. **检查点制**：每步有验收，失败即回滚
 6. **记录一切**：决策、任务、拒绝项全记录在 HARNESS_PLAN.md
+7. **完成取证**：只认真实输出，不认口头断言（见上）

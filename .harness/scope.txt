@@ -1,0 +1,7 @@
+# 任务范围声明：每行一个 glob，本次提交只允许改这些路径
+# 全为注释或缺失 = 关闭范围守卫；写 * 或 ** = 全放开
+# 示例：
+# scripts/village/**
+# scripts/player/player_controller.gd
+# STATUS.md
+# docs/**
