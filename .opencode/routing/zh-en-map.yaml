@@ -80,7 +80,6 @@ NPC系统: villager_system
 建筑: building
 建筑物: building
 建筑详情UI: house_detail_ui
-建筑预览: build_preview_controller
 建筑预览控制器: build_preview_controller
 建造: place_building
 录入术语: register_term
@@ -155,7 +154,6 @@ NPC系统: villager_system
 生物群系: biome
 盖房子: place_building
 破坏: destroy
-破坏物: destructible
 移除: despawn
 移除区块: unload_chunk
 给任务: assign_task
@@ -187,8 +185,6 @@ NPC系统: villager_system
 资源: resource
 资源刷新器: resource_spawner
 资源生成器: resource_spawner
-路网: road_network
-转建筑: rotate_building
 载入存档: load_game
 选项菜单: settings_menu
 选项配置: game_settings
@@ -204,7 +200,6 @@ NPC系统: villager_system
 销毁实体: despawn
 阶段: checkpoint
 需求文档: spec
-预览控制器: build_preview_controller
 验收: validate
 验证: validate
 鼠标管理器: cursor_manager

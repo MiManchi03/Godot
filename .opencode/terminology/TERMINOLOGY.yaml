@@ -79,7 +79,7 @@ entities:
 
   - canonical: "road_network"
     aliases: ["road_network", "道路网络"]
-    forbidden: ["道路系统", "路网", "道路管理器"]
+    forbidden: ["道路系统", "道路管理器"]
     zh_label: "道路网络"
     description: "管理道路放置、连接、渲染的网络系统"
     domain: "system"
@@ -121,7 +121,7 @@ entities:
 
   - canonical: "destructible"
     aliases: ["destructible", "可破坏物"]
-    forbidden: ["可破坏对象", "可破坏实体", "破坏物"]
+    forbidden: ["可破坏对象", "可破坏实体"]
     zh_label: "可破坏物"
     description: "可被玩家破坏的实体基类（树木/石头/草丛）"
     domain: "entity"
@@ -156,7 +156,7 @@ entities:
 
   - canonical: "build_preview_controller"
     aliases: ["build_preview_controller", "建筑预览控制器"]
-    forbidden: ["建筑预览", "预览控制器", "放置预览"]
+    forbidden: ["放置预览"]
     zh_label: "建筑预览控制器"
     description: "建筑模式下的预览、旋转、放置控制器"
     domain: "system"
@@ -248,7 +248,7 @@ actions:
 
   - canonical: "rotate_building"
     aliases: ["rotate_building", "旋转建筑"]
-    forbidden: ["转建筑", "旋转房子", "调整朝向"]
+    forbidden: ["旋转房子", "调整朝向"]
     zh_label: "旋转建筑"
     description: "建筑模式下旋转建筑朝向"
     domain: "action"

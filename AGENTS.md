@@ -10,8 +10,9 @@
 ## 2. 上游依据（先读）
 | 文档 | 作用 |
 |---|---|
-| `docs/VISION.md` | 项目愿景（阶段 6 建立） |
+| `docs/VISION.md` | 项目愿景（所有 spec 的上游） |
 | `SPEC.md` | 游戏规格与验收标准 |
+| `docs/specs/*.md` | 各子系统的 Why / What / AC / 非目标 |
 | `HARNESS_PLAN.md` | 决策 / 任务 / 拒绝项的长期记忆 |
 | `docs/harness-roadmap.md` | Harness 升级路线 |
 
@@ -23,15 +24,15 @@
 | 术语唯一来源 | `.opencode/terminology/TERMINOLOGY.yaml` |
 | 中英映射 | `.opencode/routing/zh-en-map.yaml` |
 | 接口契约 | `.opencode/contracts/**/*.contract.json` |
-| 活文档入口 | `STATUS.md`、`PITFALLS.md`（阶段 3 建立） |
+| 活文档入口 | `STATUS.md`、`PITFALLS.md` |
 
 ## 4. 硬性纪律
 1. **范围纪律**：只改任务声明的文件，禁止顺手重构无关代码。
-2. **术语一致**：代码/文档统一用 canonical 词，禁用 forbidden 词（`.pre-commit-config.yaml` 闸口）。
-3. **完成取证**：宣称完成前必须贴真实命令输出，禁止口头断言（阶段 3 强化）。
+2. **术语一致**：代码 / 文档统一用 canonical 词，禁用 forbidden 词（`.pre-commit-config.yaml` 闸口）。
+3. **完成取证**：宣称完成前必须贴真实命令输出，禁止口头断言。
 4. **回滚点**：高风险改动先打 git tag。
 5. **计划同步**：架构级决策写入 `HARNESS_PLAN.md`。
 
-## 5. 验证入口
-- 提交时：`.pre-commit-config.yaml`（术语闸口，仅新增行）
-- 一键：`verify.sh`（阶段 4 建立）
+## 5. 校验入口
+- 提交时：`.pre-commit-config.yaml`（术语 / 架构 / 依赖 / 范围 / 活文档 / 取证 / gdlint / 单测 / 契约 / save schema）
+- 一键：`bash verify.sh`

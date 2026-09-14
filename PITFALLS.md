@@ -39,6 +39,11 @@
 - 处置：Phase 5 引入 `validate_contracts.py` 并清理 14 处；`resource_spawner` 契约目录错位已纠正
 - 现状：[自动] pre-commit 与 verify.sh 每次都比对契约与实现一致
 
+### 术语表的禁用词是白名单词的子串
+- 现象：`路网` 是 `道路网络` 的子串，`破坏物` 是 `可破坏物` 的子串，写成 allowed 词也会被报错
+- 处置：Phase 6 移除 5 处此类禁用词（无法被子串匹配区分）
+- 现状：[自动] 已清理；登记术语时需自检「禁用词是否为某别名子串」
+
 ### 契约不得声明尚未提交的接口
 - 现象：`villager_system` 契约声明了 `get_villager_by_entity_id`，该方法仅存在于未提交 WIP，pre-commit 暂存后比对失败
 - 处置：先移除该声明，待 WIP 落地后补回

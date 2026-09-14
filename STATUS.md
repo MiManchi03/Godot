@@ -4,10 +4,10 @@
 > 追溯：红队演练 D7（改代码不更新活文档，无机制发现）；审计 A9
 
 ## 当前 Phase
-Phase 5（save 契约与迁移守护）完成待验收
+Phase 6（规则完善 + 去膨胀）完成待验收
 
 ## 进行中
-- 无（等待 Phase 6 批准）
+- 无（等待 Phase 7 批准）
 
 ## 阻塞
 - 无
@@ -18,6 +18,7 @@ Phase 5（save 契约与迁移守护）完成待验收
 - 2026-09-14 Phase 3：文档与纪律三重闸
 - 2026-09-14 Phase 4：GUT 单测 + gdlint + verify.sh 上线；修正 VillageService 非法语法
 - 2026-09-14 Phase 5：save schema 守卫 + 契约校验；清理 14 处契约腐烂
+- 2026-09-14 Phase 6：VISION + 6 份子系统 spec；agent 去重（164→78 行）；术语表修 5 处子串冲突
 
 ## 关键入口
 - 一键：`bash verify.sh`（术语 / 架构 / 依赖 / 契约 / save schema / gdlint / 单测）
