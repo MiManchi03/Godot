@@ -1,3 +1,6 @@
+# 全局排除：第三方/内置资源不参与格式化与自检
+exclude: '^addons/'
+
 repos:
   - repo: local
     hooks:
@@ -70,8 +73,29 @@ repos:
         verbose: true
         stages: [commit]
 
-      # 暂缓：godot --check-only 不能直接作为逐文件脚本检查器；
-      # 阶段 4 将以 gdtoolkit(gdscript-lint) + Godot 无头测试替代
+      # 静态分析：gdtoolkit gdlint（纯 pip，无需引擎）
+      # 追溯：审计 A6（无静态分析）
+      - id: gdlint
+        name: GDScript Lint (gdtoolkit)
+        entry: python tools/run_gdlint.py
+        language: system
+        files: '\.gd$'
+        pass_filenames: false
+        verbose: true
+        stages: [commit]
+
+      # 单元测试：GUT 无头（需 Godot，路径由 GODOT_PATH 或默认值决定）
+      # 追溯：红队演练 D2/D3（逻辑/边界无测试）
+      - id: unit-tests
+        name: Unit Tests (GUT headless)
+        entry: python tools/run_tests.py
+        language: system
+        files: '\.(gd|tscn)$'
+        pass_filenames: false
+        verbose: true
+        stages: [commit]
+
+      # （已由 gdtoolkit + GUT 取代）原 godot --check-only 方案作废
       # - id: godot-static-analyzer
       #   name: GDScript Static Analysis
       #   entry: godot
