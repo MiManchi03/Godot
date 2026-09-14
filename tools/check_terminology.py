@@ -60,12 +60,12 @@ def get_changed_files(only_staged: bool = False) -> List[Path]:
         if only_staged:
             result = subprocess.run(
                 ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace", check=True
             )
         else:
             result = subprocess.run(
                 ["git", "diff", "--name-only", "--diff-filter=ACM"],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace", check=True
             )
         files = [Path(f).resolve() for f in result.stdout.strip().split('\n') if f.strip()]
         return [f for f in files if should_check_file(f) and f.exists()]
@@ -85,11 +85,11 @@ def get_added_lines(files: List[Path]) -> Dict[str, Set[int]]:
             rel = os.path.relpath(f, root)
             result = subprocess.run(
                 ["git", "diff", "--cached", "-U0", "--", rel],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace", check=True
             )
         except Exception:
             continue
-        if not result.stdout.strip():
+        if not (result.stdout or "").strip():
             continue
         lines: Set[int] = set()
         cur = 0
