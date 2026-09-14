@@ -54,6 +54,12 @@
 - **验收**: 提交含禁用词的文件被拦截（D0）；check_terminology.py 不再崩溃
 - **未决**: CI 首次推送可能因历史遗留报错，留待 Phase 4 的 verify.sh 一并处理
 
+### [2026-09-14] 风险记录：pre-commit 暂存机制在 Windows 下丢改动
+- **现象**: 术语钩子运行前 pre-commit 暂存未提交改动，还原时 project.godot 的 VillageService 行被丢弃
+- **还原**: 从 `~/.cache/pre-commit/patch*` 提取补丁重新写回
+- **缓解**: 移除会清空文件的本地空白钩子；提交前建议先自行 stash 未提交改动
+- **状态**: ⚠️ 待观察（本条即对该机制的压力复测）
+
 ---
 
 ## 🔄 进行中任务
