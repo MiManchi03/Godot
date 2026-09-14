@@ -59,26 +59,23 @@ def validate_contract(contract_path: Path) -> int:
         return 1
     text = script.read_text(encoding="utf-8")
 
-    for m in data.get("methods", []):
-        if not _has_method(text, m["name"]):
-            print(f"❌ {script}: 契约声明的方法 [{m['name']}] 已不存在")
-            errors += 1
-    for s in data.get("signals", []):
-        if not _has_signal(text, s["name"]):
-            print(f"❌ {script}: 契约声明的信号 [{s['name']}] 已不存在")
-            errors += 1
-    for c in data.get("constants", []):
-        if not _has_const(text, c["name"]):
-            print(f"❌ {script}: 契约声明的常量 [{c['name']}] 已不存在")
-            errors += 1
-    for e in data.get("exports", []):
-        if not _has_var(text, e["name"]):
-            print(f"❌ {script}: 契约声明的导出 [{e['name']}] 已不存在")
-            errors += 1
-    for en in data.get("enums", []):
-        if not _has_enum(text, en["name"]):
-            print(f"❌ {script}: 契约声明的枚举 [{en['name']}] 已不存在")
-            errors += 1
+    # 条目带 "pending": true 表示接口尚未落地（WIP），缺失只告警、不算错
+    specs = [
+        ("methods", _has_method, "方法"),
+        ("signals", _has_signal, "信号"),
+        ("constants", _has_const, "常量"),
+        ("exports", _has_var, "导出"),
+        ("enums", _has_enum, "枚举"),
+    ]
+    for key, has_fn, kind in specs:
+        for it in data.get(key, []):
+            if has_fn(text, it["name"]):
+                continue
+            if it.get("pending"):
+                print(f"⚠️  {script}: 契约声明的{kind} [{it['name']}] 尚未实现（pending）")
+            else:
+                print(f"❌ {script}: 契约声明的{kind} [{it['name']}] 已不存在")
+                errors += 1
 
     return errors
 

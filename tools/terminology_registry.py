@@ -51,7 +51,7 @@ class TerminologyRegistry:
         canonical = canonical.lower().strip()
         aliases = [a.lower().strip() for a in aliases if a.strip()]
         forbidden = [f.lower().strip() for f in forbidden if f.strip()]
-        
+
         if canonical in self.terms:
             term = self.terms[canonical]
             term.aliases = list(set(term.aliases + aliases))
@@ -94,7 +94,7 @@ class TerminologyRegistry:
                 data["systems"].append(item)
             else:
                 data["entities"].append(item)
-        
+
         self.FILE.parent.mkdir(parents=True, exist_ok=True)
         self.FILE.write_text(yaml.dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
@@ -107,12 +107,12 @@ class TerminologyRegistry:
                     mapping[alias] = term.canonical
             if term.zh_label and term.zh_label != term.canonical:
                 mapping[term.zh_label] = term.canonical
-        
+
         # 添加 forbidden 反向映射
         for term in self.terms.values():
             for forbidden in term.forbidden:
                 mapping[forbidden] = term.canonical
-        
+
         self.MAPPING_FILE.parent.mkdir(parents=True, exist_ok=True)
         self.MAPPING_FILE.write_text(
             yaml.dump(mapping, allow_unicode=True, sort_keys=True),
@@ -132,6 +132,25 @@ class TerminologyRegistry:
 
     def all_terms(self) -> List['Term']:
         return list(self.terms.values())
+
+    def find_substring_conflicts(self) -> List[tuple]:
+        """自检：禁用词若是同表某「允许词」（别名/标签/标准词）的子串，
+        则子串匹配无法区分二者，会误伤合法写法。
+        返回 [(canonical, forbidden, allowed), ...]
+        追溯：PITFALLS「术语表的禁用词是白名单词的子串」
+        """
+        conflicts = []
+        for term in self.terms.values():
+            allowed = {a.lower() for a in term.aliases}
+            if term.zh_label:
+                allowed.add(term.zh_label.lower())
+            allowed.add(term.canonical.lower())
+            for forbidden in term.forbidden:
+                fl = forbidden.lower()
+                for a in allowed:
+                    if a and fl != a and fl in a:
+                        conflicts.append((term.canonical, forbidden, a))
+        return conflicts
 
     @staticmethod
     def _word_in_line(word_lower: str, line_lower: str) -> bool:
@@ -188,7 +207,7 @@ class TerminologyRegistry:
                             break
 
         return violations
-    
+
     def _extract_potential_terms(self, content: str) -> Set[str]:
         """启发式提取潜在新术语"""
         # 提取 PascalCase、snake_case、UPPER_SNAKE_CASE 词汇

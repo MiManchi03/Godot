@@ -38,6 +38,19 @@
       ],
       "return": "void",
       "description": "从系统注销村民"
+    },
+    {
+      "name": "get_villager_by_entity_id",
+      "params": [
+        {
+          "name": "entity_id",
+          "type": "String",
+          "description": "对象标识"
+        }
+      ],
+      "return": "Node3D",
+      "pending": true,
+      "description": "按对象标识取得村民（WIP 落地前 pending）"
     }
   ],
   "exports": [],

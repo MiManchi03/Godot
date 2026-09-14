@@ -132,6 +132,15 @@ def main():
 
     registry = TerminologyRegistry()
 
+    # 术语表自检：禁用词不得是任何允许词的子串（否则子串匹配必然误伤）
+    conflicts = registry.find_substring_conflicts()
+    if conflicts:
+        print("❌ 术语表子串冲突（禁用词是允许词的子串，无法区分）：")
+        for canonical, forbidden, allowed in conflicts:
+            print(f"   - {canonical}: forbidden \"{forbidden}\" ⊂ allowed \"{allowed}\"")
+        print("   请从 TERMINOLOGY.yaml 移除该禁用词，或改用更精确的写法")
+        return 1
+
     # 确定要检查的文件
     if args.base:
         files = [Path(f).resolve() for f in get_range_files(args.base, args.head)]

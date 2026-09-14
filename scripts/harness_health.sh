@@ -61,11 +61,14 @@ text = pf.read_text(encoding="utf-8") if pf.exists() else ""
 sections = re.split(r'^### ', text, flags=re.M)[1:]
 tot_e = len(sections)
 auto_e = sum(1 for s in sections if "[自动]" in s)
+semi_e = sum(1 for s in sections if "[半自动]" in s)
+mit_e = sum(1 for s in sections if "[缓解]" in s)
 new_e = sum(1 for ln in git(["log", "--since=1 month ago", "-p", "--", "PITFALLS.md"]).splitlines()
             if ln.startswith("+### "))
 ratio = (auto_e * 100 // tot_e) if tot_e else 0
 L.append("[3] PITFALLS 进化速度")
-L.append(f"    本月新增条目: {new_e}    已固化自动拦截: {auto_e}/{tot_e} ({ratio}%)")
+L.append(f"    本月新增条目: {new_e}")
+L.append(f"    真拦截: {auto_e}/{tot_e} ({ratio}%)   [半自动 {semi_e} / 缓解 {mit_e}]")
 
 # [4] 重复错误模式（>1 即红色警报）
 SIGS = {
