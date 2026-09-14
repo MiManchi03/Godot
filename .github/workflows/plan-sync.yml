@@ -1,0 +1,100 @@
+name: Plan Sync Validation
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  validate-plan-format:
+    name: Validate HARNESS_PLAN.md Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate Plan Format
+        run: |
+          python -c "
+          import re
+          import sys
+          
+          with open('HARNESS_PLAN.md', 'r', encoding='utf-8') as f:
+              content = f.read()
+          
+          errors = []
+          
+          # 必需章节检查
+          required_sections = [
+              '🎯 项目目标',
+              '✅ 已确定决策记录',
+              '🔄 进行中任务',
+              '📋 待办事项',
+              '🚫 明确拒绝/已排除'
+          ]
+          
+          for section in required_sections:
+              if f'## {section}' not in content:
+                  errors.append(f'缺少必需章节: {section}')
+          
+          # 决策记录格式检查
+          decision_pattern = r'### \[\\d{4}-\\d{2}-\\d{2}\] .+'
+          decisions = re.findall(decision_pattern, content)
+          if not decisions:
+              errors.append('未找到有效的决策记录格式 (应为: ### [YYYY-MM-DD] 标题)')
+          
+          # 任务格式检查
+          task_pattern = r'### \[任务\] .+'
+          tasks = re.findall(task_pattern, content)
+          
+          # 待办格式检查
+          todo_pattern = r'- \[ \] .+'
+          todos = re.findall(todo_pattern, content)
+          
+          # 拒绝项格式检查
+          reject_pattern = r'- ❌ .+（原因: .+）'
+          rejects = re.findall(reject_pattern, content)
+          
+          if errors:
+              print('❌ HARNESS_PLAN.md 格式错误:')
+              for e in errors:
+                  print(f'  - {e}')
+              sys.exit(1)
+          
+          print('✅ HARNESS_PLAN.md 格式验证通过')
+          print(f'  决策记录: {len(decisions)} 条')
+          print(f'  进行中任务: {len(tasks)} 个')
+          print(f'  待办事项: {len(todos)} 个')
+          print(f'  拒绝项: {len(rejects)} 个')
+          "
+
+  check-plan-sync:
+    name: Check Plan Sync with Git
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Plan Modified with Code
+        run: |
+          # 检查是否有代码变更但 plan 未更新
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD -- "*.gd" "*.tscn" "*.md" "*.yaml" "*.yml" "*.json" "*.py" | grep -v "HARNESS_PLAN.md" | head -20)
+          if [ -n "$CHANGED_FILES" ]; then
+            PLAN_CHANGED=$(git diff --name-only HEAD~1 HEAD -- "HARNESS_PLAN.md")
+            if [ -z "$PLAN_CHANGED" ]; then
+              echo "⚠️  检测到代码变更但 HARNESS_PLAN.md 未更新"
+              echo "变更文件:"
+              echo "$CHANGED_FILES"
+              echo ""
+              echo "建议: 请同步更新 HARNESS_PLAN.md 记录决策/任务"
+              # 不阻断，仅警告
+            fi
+          fi

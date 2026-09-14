@@ -1,0 +1,123 @@
+{
+  "class": "ResourceSpawner",
+  "extends": "RefCounted",
+  "description": "资源生成器 - 按群系规则生成树木、石头、草丛",
+  "signals": [],
+  "methods": [
+    {
+      "name": "_init",
+      "params": [
+        {
+          "name": "seed",
+          "type": "int"
+        }
+      ],
+      "return": "void",
+      "description": "初始化生成器种子"
+    },
+    {
+      "name": "populate_chunk",
+      "params": [
+        {
+          "name": "parent",
+          "type": "Node3D"
+        },
+        {
+          "name": "chunk_coord",
+          "type": "Vector2i"
+        },
+        {
+          "name": "chunk_size",
+          "type": "int"
+        },
+        {
+          "name": "biome",
+          "type": "BiomeGenerator.Biome"
+        }
+      ],
+      "return": "void",
+      "description": "填充区块资源：树木、石头、草丛"
+    },
+    {
+      "name": "_attempt_count",
+      "params": [
+        {
+          "name": "biome",
+          "type": "BiomeGenerator.Biome"
+        }
+      ],
+      "return": "int",
+      "description": "获取该群系的生成尝试次数"
+    },
+    {
+      "name": "_pick_resource_type",
+      "params": [
+        {
+          "name": "rng",
+          "type": "RandomNumberGenerator"
+        },
+        {
+          "name": "biome",
+          "type": "BiomeGenerator.Biome"
+        }
+      ],
+      "return": "StringName",
+      "description": "根据群系权重随机选择资源类型"
+    },
+    {
+      "name": "_create_resource",
+      "params": [
+        {
+          "name": "resource_type",
+          "type": "StringName"
+        }
+      ],
+      "return": "Node3D",
+      "description": "创建资源节点实例"
+    },
+    {
+      "name": "_create_tree",
+      "params": [],
+      "return": "Node3D",
+      "description": "创建树木实例（StaticBody3D + 碰撞体 + 可破坏区域）"
+    },
+    {
+      "name": "_create_rock",
+      "params": [],
+      "return": "Node3D",
+      "description": "创建石头实例（StaticBody3D + 碰撞体 + 可破坏区域）"
+    },
+    {
+      "name": "_create_grass",
+      "params": [],
+      "return": "Node3D",
+      "description": "创建草丛实例（Area3D + 可破坏区域，无物理碰撞体）"
+    },
+    {
+      "name": "_chunk_seed",
+      "params": [
+        {
+          "name": "chunk_coord",
+          "type": "Vector2i"
+        }
+      ],
+      "return": "int",
+      "description": "计算区块确定性种子"
+    },
+    {
+      "name": "_material",
+      "params": [
+        {
+          "name": "color",
+          "type": "Color"
+        }
+      ],
+      "return": "StandardMaterial3D",
+      "description": "创建标准材质"
+    }
+  ],
+  "exports": [],
+  "constants": [],
+  "enums": [],
+  "groups": []
+}

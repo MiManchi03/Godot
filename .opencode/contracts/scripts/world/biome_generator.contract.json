@@ -1,0 +1,58 @@
+{
+  "class": "BiomeGenerator",
+  "extends": "RefCounted",
+  "description": "群系生成器 - 基于噪声生成群系分布",
+  "signals": [],
+  "methods": [
+    {
+      "name": "_init",
+      "params": [
+        {
+          "name": "seed",
+          "type": "int"
+        }
+      ],
+      "return": "void",
+      "description": "初始化生成器种子"
+    },
+    {
+      "name": "get_biome_at",
+      "params": [
+        {
+          "name": "world_x",
+          "type": "float"
+        },
+        {
+          "name": "world_z",
+          "type": "float"
+        }
+      ],
+      "return": "Biome",
+      "description": "获取指定世界坐标的群系类型"
+    },
+    {
+      "name": "get_height_at",
+      "params": [
+        {
+          "name": "world_x",
+          "type": "float"
+        },
+        {
+          "name": "world_z",
+          "type": "float"
+        }
+      ],
+      "return": "float",
+      "description": "获取指定坐标的地形高度"
+    }
+  ],
+  "exports": [],
+  "constants": [],
+  "enums": [
+    {
+      "name": "Biome",
+      "values": ["PLAINS", "FOREST", "HILLS", "MOUNTAINS"]
+    }
+  ],
+  "groups": []
+}

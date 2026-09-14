@@ -1,0 +1,319 @@
+{
+  "class": "WorldManager",
+  "extends": "Node3D",
+  "description": "世界管理器 - 核心世界系统协调器",
+  "signals": [
+    {
+      "name": "player_spawn_ready",
+      "params": [
+        {
+          "name": "safe_position",
+          "type": "Vector3",
+          "description": "玩家安全生成位置"
+        }
+      ],
+      "description": "玩家安全生成位置就绪时发射"
+    }
+  ],
+  "methods": [
+    {
+      "name": "_ready",
+      "params": [],
+      "return": "void",
+      "description": "初始化世界管理器，加载种子、生成器、玩家位置"
+    },
+    {
+      "name": "_process",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float",
+          "description": "帧时间增量"
+        }
+      ],
+      "return": "void",
+      "description": "每帧更新区块、村民快照、道路状态"
+    },
+    {
+      "name": "_exit_tree",
+      "params": [],
+      "return": "void",
+      "description": "退出时保存玩家位置"
+    },
+    {
+      "name": "_ensure_player_chunk_loaded_now",
+      "params": [],
+      "return": "void",
+      "description": "立即确保玩家所在区块加载完成"
+    },
+    {
+      "name": "_emit_player_spawn_ready",
+      "params": [],
+      "return": "void",
+      "description": "发射玩家生成就绪信号"
+    },
+    {
+      "name": "_update_chunks_around_player",
+      "params": [],
+      "return": "void",
+      "description": "更新玩家周围的区块加载/卸载"
+    },
+    {
+      "name": "_load_saved_player_position",
+      "params": [],
+      "return": "void",
+      "description": "从存档加载玩家位置"
+    },
+    {
+      "name": "_save_player_position",
+      "params": [],
+      "return": "void",
+      "description": "保存玩家当前位置到存档"
+    },
+    {
+      "name": "_snapshot_loaded_villagers",
+      "params": [
+        {
+          "name": "force",
+          "type": "bool",
+          "description": "是否强制快照"
+        }
+      ],
+      "return": "void",
+      "description": "快照已加载村民状态"
+    },
+    {
+      "name": "_rebuild_road_state_from_loaded_chunks",
+      "params": [],
+      "return": "void",
+      "description": "从已加载区块重建道路状态"
+    },
+    {
+      "name": "_create_road_renderer",
+      "params": [],
+      "return": "Node",
+      "description": "创建道路渲染节点"
+    },
+    {
+      "name": "_ensure_villager_system",
+      "params": [],
+      "return": "void",
+      "description": "确保村民系统已初始化"
+    },
+    {
+      "name": "get_loaded_chunks",
+      "params": [],
+      "return": "Dictionary",
+      "description": "获取已加载的区块字典"
+    },
+    {
+      "name": "has_road_cell",
+      "params": [
+        {
+          "name": "cell",
+          "type": "Vector2i",
+          "description": "区块坐标"
+        }
+      ],
+      "return": "bool",
+      "description": "检查指定单元格是否有道路"
+    },
+    {
+      "name": "show_village_boundaries",
+      "params": [],
+      "return": "void",
+      "description": "显示村庄边界（建筑模式）"
+    },
+    {
+      "name": "hide_village_boundaries",
+      "params": [],
+      "return": "void",
+      "description": "隐藏村庄边界"
+    },
+    {
+      "name": "save_build_mode_changes",
+      "params": [],
+      "return": "void",
+      "description": "保存建筑模式下的改动"
+    },
+    {
+      "name": "save_player_buildings",
+      "params": [],
+      "return": "void",
+      "description": "保存玩家建筑数据"
+    },
+    {
+      "name": "find_node_by_entity_id",
+      "params": [
+        {
+          "name": "entity_id",
+          "type": "String",
+          "description": "实体ID"
+        }
+      ],
+      "return": "Node3D",
+      "description": "根据实体ID查找节点"
+    },
+    {
+      "name": "get_house_occupant",
+      "params": [
+        {
+          "name": "house_entity_id",
+          "type": "String",
+          "description": "房屋实体ID"
+        }
+      ],
+      "return": "String",
+      "description": "获取房屋居住者实体ID"
+    },
+    {
+      "name": "assign_villager_to_house",
+      "params": [
+        {
+          "name": "house_entity_id",
+          "type": "String",
+          "description": "房屋实体ID"
+        },
+        {
+          "name": "villager_entity_id",
+          "type": "String",
+          "description": "村民实体ID"
+        }
+      ],
+      "return": "bool",
+      "description": "分配村民到房屋"
+    },
+    {
+      "name": "remove_house_occupant",
+      "params": [
+        {
+          "name": "house_entity_id",
+          "type": "String",
+          "description": "房屋实体ID"
+        }
+      ],
+      "return": "bool",
+      "description": "移除房屋居住者"
+    },
+    {
+      "name": "get_villager_house",
+      "params": [
+        {
+          "name": "villager_entity_id",
+          "type": "String",
+          "description": "村民实体ID"
+        }
+      ],
+      "return": "String",
+      "description": "获取村民所属房屋实体ID"
+    },
+    {
+      "name": "save_villager_state",
+      "params": [
+        {
+          "name": "villager",
+          "type": "Node3D",
+          "description": "村民节点"
+        },
+        {
+          "name": "force",
+          "type": "bool",
+          "description": "是否强制保存"
+        }
+      ],
+      "return": "void",
+      "description": "保存村民状态"
+    }
+  ],
+  "exports": [
+    {
+      "name": "world_seed",
+      "type": "int",
+      "default": 91357,
+      "description": "世界生成种子"
+    }
+  ],
+  "constants": [
+    {
+      "name": "CHUNK_SIZE",
+      "value": 32,
+      "description": "区块大小（格子数）"
+    },
+    {
+      "name": "LOAD_RADIUS",
+      "value": 5,
+      "description": "加载半径（区块数）"
+    },
+    {
+      "name": "UNLOAD_RADIUS",
+      "value": 7,
+      "description": "卸载半径（区块数）"
+    },
+    {
+      "name": "CHUNK_CREATES_PER_FRAME",
+      "value": 2,
+      "description": "每帧创建区块数"
+    },
+    {
+      "name": "VILLAGER_SNAPSHOT_INTERVAL",
+      "value": 5.0,
+      "description": "村民快照间隔（秒）"
+    },
+    {
+      "name": "VILLAGER_SAVE_POS_EPS",
+      "value": 0.2,
+      "description": "村民保存位置阈值"
+    },
+    {
+      "name": "VILLAGER_SAVE_ROT_EPS",
+      "value": 0.08,
+      "description": "村民保存旋转阈值"
+    },
+    {
+      "name": "PLAYER_SAFE_LIFT",
+      "value": 1.2,
+      "description": "玩家安全抬升高度"
+    },
+    {
+      "name": "PLAYER_SPAWN_RAY_UP",
+      "value": 8.0,
+      "description": "玩家生成向上射线长度"
+    },
+    {
+      "name": "PLAYER_SPAWN_RAY_DOWN",
+      "value": 64.0,
+      "description": "玩家生成向下射线长度"
+    },
+    {
+      "name": "PLAYER_MIN_SAFE_Y",
+      "value": -20.0,
+      "description": "玩家最小安全Y坐标"
+    },
+    {
+      "name": "PLAYER_FALLBACK_Y",
+      "value": 2.0,
+      "description": "玩家备用Y坐标"
+    }
+  ],
+  "enums": [
+    {
+      "name": "BuildingType",
+      "values": [
+        "HOUSE",
+        "WORKSHOP",
+        "WAREHOUSE",
+        "MARKET",
+        "WELL",
+        "CAMPFIRE",
+        "FENCE_POST",
+        "ROAD",
+        "FARM",
+        "TOWER",
+        "BARRACK"
+      ]
+    }
+  ],
+  "groups": [
+    "world_manager"
+  ]
+}

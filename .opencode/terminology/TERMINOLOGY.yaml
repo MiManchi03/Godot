@@ -1,0 +1,360 @@
+# TERMINOLOGY.yaml
+# 术语单一事实来源 - 所有术语的唯一权威定义
+# 维护规则：
+# 1. canonical 为代码/技能/映射表/文档统一使用的标准词
+# 2. aliases 为允许的别名（大小写不敏感）
+# 3. forbidden 为禁止词（出现即报错）
+# 4. 新增概念必须先在此注册，再生成代码
+
+entities:
+  - canonical: "npc"
+    aliases: ["npc", "NPC"]
+    forbidden: ["人物", "角色", "居民", "单位", "实体", "角色实体"]
+    zh_label: "NPC"
+    description: "非玩家角色，包含村民、商人、守卫等"
+    domain: "entity"
+
+  - canonical: "villager"
+    aliases: ["villager", "村民"]
+    forbidden: ["居民", "人物", "村里人"]
+    zh_label: "村民"
+    description: "定居在村庄的 NPC 子类，可分配工作、有家庭"
+    domain: "entity"
+
+  - canonical: "building"
+    aliases: ["building", "建筑"]
+    forbidden: ["房子", "房屋", "设施", "构筑物", "建筑物"]
+    zh_label: "建筑"
+    description: "玩家可建造/村庄生成的建筑物"
+    domain: "entity"
+
+  - canonical: "chunk"
+    aliases: ["chunk", "区块"]
+    forbidden: ["方块", "区域", "地块", "地图块", "分块"]
+    zh_label: "区块"
+    description: "世界分块单位，32x32 格"
+    domain: "entity"
+
+  - canonical: "biome"
+    aliases: ["biome", "群系", "生物群系"]
+    forbidden: ["地形", "环境", "地貌", "区域类型"]
+    zh_label: "群系"
+    description: "世界生物群系：平原/森林/山地"
+    domain: "entity"
+
+  - canonical: "resource"
+    aliases: ["resource", "资源"]
+    forbidden: ["材料", "物资", "原料"]
+    zh_label: "资源"
+    description: "可采集/存储的游戏资源"
+    domain: "entity"
+
+  - canonical: "item"
+    aliases: ["item", "物品"]
+    forbidden: ["道具", "东西", "物件"]
+    zh_label: "物品"
+    description: "背包/仓库中存储的物品"
+    domain: "entity"
+
+  - canonical: "villager_system"
+    aliases: ["villager_system", "村民系统"]
+    forbidden: ["村民管理器", "NPC系统", "居民系统"]
+    zh_label: "村民系统"
+    description: "管理村民生成、行为、任务分配的系统"
+    domain: "system"
+
+  - canonical: "world_manager"
+    aliases: ["world_manager", "世界管理器"]
+    forbidden: ["世界控制器", "地图管理器", "世界系统"]
+    zh_label: "世界管理器"
+    description: "管理世界生成、区块加载、存档的核心管理器"
+    domain: "system"
+
+  - canonical: "world_state"
+    aliases: ["world_state", "世界状态"]
+    forbidden: ["世界数据", "游戏状态", "存档数据"]
+    zh_label: "世界状态"
+    description: "持久化的世界运行时状态数据"
+    domain: "system"
+
+  - canonical: "road_network"
+    aliases: ["road_network", "道路网络"]
+    forbidden: ["道路系统", "路网", "道路管理器"]
+    zh_label: "道路网络"
+    description: "管理道路放置、连接、渲染的网络系统"
+    domain: "system"
+
+  - canonical: "resource_spawner"
+    aliases: ["resource_spawner", "资源生成器"]
+    forbidden: ["刷新器", "资源刷新器"]
+    zh_label: "资源生成器"
+    description: "按群系规则生成树木、石头、草丛的生成器"
+    domain: "system"
+
+  - canonical: "biome_generator"
+    aliases: ["biome_generator", "群系生成器"]
+    forbidden: ["地形生成器", "环境生成器"]
+    zh_label: "群系生成器"
+    description: "基于噪声生成群系分布的生成器"
+    domain: "system"
+
+  - canonical: "village_generator"
+    aliases: ["village_generator", "村庄生成器"]
+    forbidden: ["村落生成器", "聚落生成器"]
+    zh_label: "村庄生成器"
+    description: "在平原群系生成村庄的生成器"
+    domain: "system"
+
+  - canonical: "player_controller"
+    aliases: ["player_controller", "玩家控制器"]
+    forbidden: ["角色控制器", "主角控制器"]
+    zh_label: "玩家控制器"
+    description: "处理玩家移动、旋转、交互的控制器"
+    domain: "system"
+
+  - canonical: "inventory_manager"
+    aliases: ["inventory_manager", "背包管理器"]
+    forbidden: ["物品管理器", "仓库管理器"]
+    zh_label: "背包管理器"
+    description: "管理玩家背包、快捷栏、物品堆叠的管理器"
+    domain: "system"
+
+  - canonical: "destructible"
+    aliases: ["destructible", "可破坏物"]
+    forbidden: ["可破坏对象", "可破坏实体", "破坏物"]
+    zh_label: "可破坏物"
+    description: "可被玩家破坏的实体基类（树木/石头/草丛）"
+    domain: "entity"
+
+  - canonical: "inventory_ui"
+    aliases: ["inventory_ui", "背包UI"]
+    forbidden: ["背包界面", "背包面板", "物品栏UI"]
+    zh_label: "背包UI"
+    description: "显示玩家背包、快捷栏的UI"
+    domain: "ui"
+
+  - canonical: "hotbar_ui"
+    aliases: ["hotbar_ui", "快捷栏UI"]
+    forbidden: ["快捷栏界面", "物品栏UI", "快捷栏面板"]
+    zh_label: "快捷栏UI"
+    description: "游戏过程中显示的快捷栏UI"
+    domain: "ui"
+
+  - canonical: "settings_menu"
+    aliases: ["settings_menu", "设置菜单"]
+    forbidden: ["设置界面", "选项菜单", "配置菜单"]
+    zh_label: "设置菜单"
+    description: "游戏设置菜单（灵敏度、画面、音频等）"
+    domain: "ui"
+
+  - canonical: "game_settings"
+    aliases: ["game_settings", "游戏设置"]
+    forbidden: ["游戏配置", "设置数据", "选项配置"]
+    zh_label: "游戏设置"
+    description: "持久化的游戏设置数据（灵敏度、音量等）"
+    domain: "system"
+
+  - canonical: "build_preview_controller"
+    aliases: ["build_preview_controller", "建筑预览控制器"]
+    forbidden: ["建筑预览", "预览控制器", "放置预览"]
+    zh_label: "建筑预览控制器"
+    description: "建筑模式下的预览、旋转、放置控制器"
+    domain: "system"
+
+  - canonical: "villager_task_ui"
+    aliases: ["villager_task_ui", "村民任务UI"]
+    forbidden: ["村民任务界面", "任务分配UI", "村民任务面板"]
+    zh_label: "村民任务UI"
+    description: "显示/分配村民任务的UI"
+    domain: "ui"
+
+  - canonical: "house_detail_ui"
+    aliases: ["house_detail_ui", "房屋详情UI"]
+    forbidden: ["房屋详情界面", "建筑详情UI", "房屋信息面板"]
+    zh_label: "房屋详情UI"
+    description: "显示房屋信息、分配村民的详情面板"
+    domain: "ui"
+
+  - canonical: "interact_ui"
+    aliases: ["interact_ui", "交互UI"]
+    forbidden: ["交互界面", "交互提示", "交互面板"]
+    zh_label: "交互UI"
+    description: "显示交互提示（如按F交互）的UI"
+    domain: "ui"
+
+  - canonical: "cursor_manager"
+    aliases: ["cursor_manager", "光标管理器"]
+    forbidden: ["鼠标管理器", "光标控制器", "指针管理器"]
+    zh_label: "光标管理器"
+    description: "管理鼠标光标状态、样式的管理器"
+    domain: "system"
+
+actions:
+  - canonical: "spawn"
+    aliases: ["spawn", "生成", "刷新"]
+    forbidden: ["创建", "新建", "添加", "产生", "出现", "实例化"]
+    zh_label: "生成"
+    description: "运行时动态创建实体/资源"
+    domain: "action"
+
+  - canonical: "despawn"
+    aliases: ["despawn", "销毁", "移除"]
+    forbidden: ["删除", "清除", "销毁实体"]
+    zh_label: "反生成"
+    description: "运行时移除实体/资源"
+    domain: "action"
+
+  - canonical: "spawn_resource"
+    aliases: ["spawn_resource", "生成资源"]
+    forbidden: ["刷资源", "产出资源", "生成材料"]
+    zh_label: "生成资源"
+    description: "按群系规则生成资源实体"
+    domain: "action"
+
+  - canonical: "destroy"
+    aliases: ["destroy", "销毁", "破坏"]
+    forbidden: ["删除", "拆除", "清除", "消除"]
+    zh_label: "破坏"
+    description: "玩家主动破坏可破坏物"
+    domain: "action"
+
+  - canonical: "validate"
+    aliases: ["validate", "校验", "验收"]
+    forbidden: ["检查", "核对", "审核", "验证"]
+    zh_label: "校验"
+    description: "验证规格/契约/数据是否符合标准"
+    domain: "action"
+
+  - canonical: "spawn_villager"
+    aliases: ["spawn_villager", "生成村民"]
+    forbidden: ["创建村民", "刷村民", "新建村民"]
+    zh_label: "生成村民"
+    description: "在村庄生成新村民"
+    domain: "action"
+
+  - canonical: "assign_task"
+    aliases: ["assign_task", "分配任务"]
+    forbidden: ["给任务", "派发任务", "指派任务"]
+    zh_label: "分配任务"
+    description: "给村民分配工作任务"
+    domain: "action"
+
+  - canonical: "place_building"
+    aliases: ["place_building", "放置建筑"]
+    forbidden: ["建造", "盖房子", "建房子", "放房子"]
+    zh_label: "放置建筑"
+    description: "建筑模式下放置建筑"
+    domain: "action"
+
+  - canonical: "rotate_building"
+    aliases: ["rotate_building", "旋转建筑"]
+    forbidden: ["转建筑", "旋转房子", "调整朝向"]
+    zh_label: "旋转建筑"
+    description: "建筑模式下旋转建筑朝向"
+    domain: "action"
+
+  - canonical: "spawn_resource_node"
+    aliases: ["spawn_resource_node", "生成资源点"]
+    forbidden: ["刷资源点", "生成矿点", "产出资源点"]
+    zh_label: "生成资源点"
+    description: "按群系生成资源采集点"
+    domain: "action"
+
+  - canonical: "load_chunk"
+    aliases: ["load_chunk", "加载区块"]
+    forbidden: ["加载方块", "读取区块", "加载地图块"]
+    zh_label: "加载区块"
+    description: "动态加载玩家周围区块"
+    domain: "action"
+
+  - canonical: "unload_chunk"
+    aliases: ["unload_chunk", "卸载区块"]
+    forbidden: ["卸载方块", "移除区块", "释放区块"]
+    zh_label: "卸载区块"
+    description: "卸载远离玩家的区块"
+    domain: "action"
+
+  - canonical: "save_game"
+    aliases: ["save_game", "保存游戏"]
+    forbidden: ["存档", "存盘", "保存进度"]
+    zh_label: "保存游戏"
+    description: "持久化世界状态到磁盘"
+    domain: "action"
+
+  - canonical: "load_game"
+    aliases: ["load_game", "读取游戏"]
+    forbidden: ["读档", "载入存档", "加载进度"]
+    zh_label: "读取游戏"
+    description: "从磁盘恢复世界状态"
+    domain: "action"
+
+  - canonical: "register_term"
+    aliases: ["register_term", "注册术语"]
+    forbidden: ["添加术语", "新增术语", "录入术语"]
+    zh_label: "注册术语"
+    description: "向术语表注册新标准术语"
+    domain: "action"
+
+  - canonical: "sync_mapping"
+    aliases: ["sync_mapping", "同步映射"]
+    forbidden: ["更新映射", "刷新映射", "重建映射"]
+    zh_label: "同步映射"
+    description: "同步术语表到中英映射表"
+    domain: "action"
+
+systems:
+  - canonical: "harness"
+    aliases: ["harness", "哈尼斯"]
+    forbidden: ["框架", "工具链", "工程体系"]
+    zh_label: "Harness"
+    description: "规格驱动+技能编排+自动验证的工程体系"
+    domain: "system"
+
+  - canonical: "spec"
+    aliases: ["spec", "规格"]
+    forbidden: ["规格书", "需求文档", "设计文档"]
+    zh_label: "规格"
+    description: "SPEC.md 单一事实来源"
+    domain: "system"
+
+  - canonical: "contract"
+    aliases: ["contract", "契约"]
+    forbidden: ["接口定义", "API定义", "契约文件"]
+    zh_label: "契约"
+    description: "接口契约文件"
+    domain: "system"
+
+  - canonical: "skill"
+    aliases: ["skill", "技能"]
+    forbidden: ["能力", "模块", "插件"]
+    zh_label: "技能"
+    description: "Harness 可复用的自动化能力单元"
+    domain: "system"
+
+  - canonical: "agent"
+    aliases: ["agent", "智能体"]
+    forbidden: ["代理", "助手", "Bot"]
+    zh_label: "智能体"
+    description: "opencode 专用 Agent"
+    domain: "system"
+
+  - canonical: "plan"
+    aliases: ["plan", "计划"]
+    forbidden: ["计划书", "任务单", "待办"]
+    zh_label: "计划"
+    description: "HARNESS_PLAN.md 项目长期记忆"
+    domain: "system"
+
+  - canonical: "checkpoint"
+    aliases: ["checkpoint", "检查点"]
+    forbidden: ["节点", "里程碑", "阶段"]
+    zh_label: "检查点"
+    description: "验证通过后的自动 Git 提交点"
+    domain: "system"
+
+  - canonical: "rollback"
+    aliases: ["rollback", "回滚"]
+    forbidden: ["撤销", "恢复", "回退"]
+    zh_label: "回滚"
+    description: "回退到指定检查点"
+    domain: "action"

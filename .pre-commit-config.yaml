@@ -1,0 +1,65 @@
+repos:
+  - repo: local
+    hooks:
+      # 术语闸口：仅检查本次新增行，历史遗留不阻断
+      # 追溯：红队演练 Gate A（术语检查崩溃）+ 审计 A1/A2（闸口失效）
+      - id: terminology-check
+        name: Terminology Consistency Check (new lines only)
+        entry: python tools/check_terminology.py
+        language: system
+        types: [gdscript, gdscene, md, yaml, yml, json, py]
+        pass_filenames: true
+        args: ["--added-lines-only"]
+        verbose: true
+        stages: [commit]
+      
+      # 暂缓：godot --check-only 不能直接作为逐文件脚本检查器；
+      # 阶段 4 将以 gdtoolkit(gdscript-lint) + Godot 无头测试替代
+      # - id: godot-static-analyzer
+      #   name: GDScript Static Analysis
+      #   entry: godot
+      #   language: system
+      #   types: [gdscript]
+      #   args: ["--headless", "--check-only"]
+      #   pass_filenames: true
+      #   stages: [commit]
+      #   require_serial: true
+      
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        entry: python -c "import sys; [open(f, 'w').write(open(f).read().rstrip() + '\n') for f in sys.argv[1:]]"
+        language: system
+        types: [text]
+        stages: [commit]
+      
+      - id: end-of-file-fixer
+        name: Fix End of Files
+        entry: python -c "import sys; [open(f, 'wb').write(open(f, 'rb').read().rstrip() + b'\n') for f in sys.argv[1:]]"
+        language: system
+        types: [text]
+        stages: [commit]
+      
+      - id: check-yaml
+        name: Check YAML Syntax
+        entry: python -c "import yaml, sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
+        language: system
+        types: [yaml, yml]
+        stages: [commit]
+      
+      - id: check-json
+        name: Check JSON Syntax
+        entry: python -c "import json, sys; [json.load(open(f)) for f in sys.argv[1:]]"
+        language: system
+        types: [json]
+        stages: [commit]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: debug-logger
+      - id: detect-private-key

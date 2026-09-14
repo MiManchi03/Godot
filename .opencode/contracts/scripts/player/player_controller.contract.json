@@ -1,0 +1,732 @@
+{
+  "class": "PlayerController",
+  "extends": "CharacterBody3D",
+  "description": "玩家控制器 - 处理移动、旋转、交互、建筑模式",
+  "signals": [],
+  "methods": [
+    {
+      "name": "_ready",
+      "params": [],
+      "return": "void",
+      "description": "初始化玩家控制器、加载设置、设置摄像机、抓取焦点"
+    },
+    {
+      "name": "_physics_process",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float",
+          "description": "物理帧时间增量"
+        }
+      ],
+      "return": "void",
+      "description": "物理帧更新：冲刺状态、摄像机拖拽、角色旋转、垂直运动、移动、摄像机跟随、交互目标、破坏、UI定时器"
+    },
+    {
+      "name": "_input",
+      "params": [
+        {
+          "name": "event",
+          "type": "InputEvent",
+          "description": "输入事件"
+        }
+      ],
+      "return": "void",
+      "description": "处理输入：鼠标按键（左键破坏、右键拖拽摄像机）、键盘（Tab切换背包、F3显示鼠标、G切换碰撞显示、B切换建筑模式、F交互）"
+    },
+    {
+      "name": "apply_camera_settings",
+      "params": [],
+      "return": "void",
+      "description": "从设置应用摄像机参数（灵敏度、高度、距离、角度偏移、拖拽启用/灵敏度、建筑拖拽灵敏度）"
+    },
+    {
+      "name": "refresh_camera_from_settings",
+      "params": [],
+      "return": "void",
+      "description": "刷新摄像机设置并更新跟随"
+    },
+    {
+      "name": "_update_sprint_state",
+      "params": [],
+      "return": "void",
+      "description": "更新冲刺状态：双击前进键开启冲刺，释放前进键关闭冲刺"
+    },
+    {
+      "name": "_update_sprint_fov",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "更新冲刺FOV动画"
+    },
+    {
+      "name": "_update_camera_drag",
+      "params": [],
+      "return": "void",
+      "description": "更新右键拖拽摄像机角度偏移"
+    },
+    {
+      "name": "_update_character_rotation_toward_mouse",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "角色朝向鼠标指针在地面投影点旋转"
+    },
+    {
+      "name": "_handle_movement",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "处理WASD移动输入，计算目标速度，应用加速度"
+    },
+    {
+      "name": "_handle_vertical_motion",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "处理垂直运动：重力、落地、跳跃"
+    },
+    {
+      "name": "_update_camera_follow",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "更新摄像机跟随：基于角度偏移计算位置，LookAt角色"
+    },
+    {
+      "name": "_update_interaction_target",
+      "params": [],
+      "return": "void",
+      "description": "更新交互目标：球形检测范围内的房屋"
+    },
+    {
+      "name": "_set_interact_target",
+      "params": [
+        {
+          "name": "target",
+          "type": "Node3D",
+          "description": "交互目标节点"
+        }
+      ],
+      "return": "void",
+      "description": "设置交互目标并更新提示显示"
+    },
+    {
+      "name": "_try_open_interaction",
+      "params": [],
+      "return": "void",
+      "description": "尝试打开交互面板（按F键）"
+    },
+    {
+      "name": "_open_house_detail_for",
+      "params": [
+        {
+          "name": "house_node",
+          "type": "Node3D"
+        }
+      ],
+      "return": "void",
+      "description": "打开房屋详情面板，加载居住者和可分配村民列表"
+    },
+    {
+      "name": "_on_house_request_assign_villager",
+      "params": [
+        {
+          "name": "villager_entity_id",
+          "type": "String"
+        }
+      ],
+      "return": "void",
+      "description": "处理房屋分配村民请求"
+    },
+    {
+      "name": "_on_house_request_unassign",
+      "params": [],
+      "return": "void",
+      "description": "处理房屋取消分配村民请求"
+    },
+    {
+      "name": "_toggle_inventory",
+      "params": [],
+      "return": "void",
+      "description": "切换背包UI显示/隐藏"
+    },
+    {
+      "name": "_toggle_build_mode",
+      "params": [],
+      "return": "void",
+      "description": "切换建筑模式"
+    },
+    {
+      "name": "_enter_build_mode",
+      "params": [],
+      "return": "void",
+      "description": "进入建筑模式：隐藏角色、显示建筑UI、正交投影摄像机"
+    },
+    {
+      "name": "_exit_build_mode",
+      "params": [],
+      "return": "void",
+      "description": "退出建筑模式：保存改动、恢复透视摄像机、显示角色"
+    },
+    {
+      "name": "_update_build_mode",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "建筑模式更新：摄像机跟随、预览更新、道路绘制、旋转手柄、村民持有"
+    },
+    {
+      "name": "_handle_build_mode_input",
+      "params": [
+        {
+          "name": "event",
+          "type": "InputEvent"
+        }
+      ],
+      "return": "void",
+      "description": "处理建筑模式输入：ESC取消、鼠标左/右键放置/删除、滚轮缩放/旋转、双击拾取村民/建筑"
+    },
+    {
+      "name": "_update_road_painting_step",
+      "params": [],
+      "return": "void",
+      "description": "道路绘制步进：按预算批量放置道路"
+    },
+    {
+      "name": "_cells_between_4_connected",
+      "params": [
+        {
+          "name": "from_cell",
+          "type": "Vector2i"
+        },
+        {
+          "name": "to_cell",
+          "type": "Vector2i"
+        }
+      ],
+      "return": "Array[Vector2i]",
+      "description": "计算两个单元格间的4连通路径"
+    },
+    {
+      "name": "_handle_road_right_click",
+      "params": [],
+      "return": "void",
+      "description": "处理道路右键：起点在路则删路，否则铺路"
+    },
+    {
+      "name": "_compute_quick_place_path",
+      "params": [
+        {
+          "name": "start_cell",
+          "type": "Vector2i"
+        },
+        {
+          "name": "end_cell",
+          "type": "Vector2i"
+        }
+      ],
+      "return": "Array[Vector2i]",
+      "description": "计算快速放置路径"
+    },
+    {
+      "name": "_apply_quick_place_path",
+      "params": [
+        {
+          "name": "path_cells",
+          "type": "Array[Vector2i]"
+        }
+      ],
+      "return": "void",
+      "description": "应用快速放置路径"
+    },
+    {
+      "name": "_compute_quick_delete_cells",
+      "params": [
+        {
+          "name": "start_cell",
+          "type": "Vector2i"
+        },
+        {
+          "name": "end_cell",
+          "type": "Vector2i"
+        }
+      ],
+      "return": "Array[Vector2i]",
+      "description": "计算快速删除单元格"
+    },
+    {
+      "name": "_update_destruction",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "更新破坏进度：检测目标、更新进度、完成破坏"
+    },
+    {
+      "name": "_check_destruction_target",
+      "params": [],
+      "return": "void",
+      "description": "检测破坏目标：鼠标射线检测Area3D，距离检查"
+    },
+    {
+      "name": "_complete_destruction",
+      "params": [],
+      "return": "void",
+      "description": "完成破坏：掉落物品、销毁目标、重置状态"
+    },
+    {
+      "name": "cancel_destruction",
+      "params": [],
+      "return": "void",
+      "description": "取消破坏：取消当前目标、重置进度"
+    },
+    {
+      "name": "_setup_destroy_ui",
+      "params": [],
+      "return": "void",
+      "description": "初始化破坏进度UI"
+    },
+    {
+      "name": "_setup_build_mode_ui",
+      "params": [],
+      "return": "void",
+      "description": "初始化建筑模式UI"
+    },
+    {
+      "name": "_setup_villager_task_ui",
+      "params": [],
+      "return": "void",
+      "description": "初始化村民任务UI"
+    },
+    {
+      "name": "_setup_interact_ui",
+      "params": [],
+      "return": "void",
+      "description": "初始化交互提示UI"
+    },
+    {
+      "name": "_settings_load",
+      "params": [],
+      "return": "void",
+      "description": "加载游戏设置"
+    },
+    {
+      "name": "_settings_get_float",
+      "params": [
+        {
+          "name": "property_name",
+          "type": "String"
+        },
+        {
+          "name": "fallback",
+          "type": "float"
+        }
+      ],
+      "return": "float",
+      "description": "从设置获取浮点值"
+    },
+    {
+      "name": "_settings_get_bool",
+      "params": [
+        {
+          "name": "property_name",
+          "type": "String"
+        },
+        {
+          "name": "fallback",
+          "type": "bool"
+        }
+      ],
+      "return": "bool",
+      "description": "从设置获取布尔值"
+    },
+    {
+      "name": "_save_camera_angle",
+      "params": [],
+      "return": "void",
+      "description": "保存摄像机角度偏移到设置"
+    },
+    {
+      "name": "_toggle_debug_collision",
+      "params": [],
+      "return": "void",
+      "description": "切换碰撞调试显示"
+    },
+    {
+      "name": "_on_world_player_spawn_ready",
+      "params": [
+        {
+          "name": "safe_position",
+          "type": "Vector3"
+        }
+      ],
+      "return": "void",
+      "description": "世界就绪回调：设置玩家就绪标志"
+    },
+    {
+      "name": "_update_sprint_fov",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "更新冲刺FOV"
+    },
+    {
+      "name": "_update_destroy_ui_timers",
+      "params": [
+        {
+          "name": "delta",
+          "type": "float"
+        }
+      ],
+      "return": "void",
+      "description": "更新破坏UI计时器"
+    }
+  ],
+  "exports": [
+    {
+      "name": "move_speed",
+      "type": "float",
+      "default": 6.0,
+      "description": "基础移动速度"
+    },
+    {
+      "name": "sprint_speed_multiplier",
+      "type": "float",
+      "default": 1.8,
+      "description": "冲刺速度倍数"
+    },
+    {
+      "name": "sprint_double_tap_window",
+      "type": "float",
+      "default": 0.3,
+      "description": "双击前进键时间窗口"
+    },
+    {
+      "name": "sprint_fov_boost",
+      "type": "float",
+      "default": 8.0,
+      "description": "冲刺FOV增幅"
+    },
+    {
+      "name": "sprint_fov_lerp_speed",
+      "type": "float",
+      "default": 8.0,
+      "description": "冲刺FOV插值速度"
+    },
+    {
+      "name": "acceleration",
+      "type": "float",
+      "default": 12.0,
+      "description": "地面加速度"
+    },
+    {
+      "name": "air_acceleration",
+      "type": "float",
+      "default": 20.0,
+      "description": "空中加速度"
+    },
+    {
+      "name": "rotation_speed",
+      "type": "float",
+      "default": 6.0,
+      "description": "地面旋转速度"
+    },
+    {
+      "name": "air_rotation_speed",
+      "type": "float",
+      "default": 32.0,
+      "description": "空中旋转速度"
+    },
+    {
+      "name": "jump_velocity",
+      "type": "float",
+      "default": 14.4,
+      "description": "跳跃初速度"
+    },
+    {
+      "name": "gravity_strength",
+      "type": "float",
+      "default": 40.0,
+      "description": "重力强度"
+    },
+    {
+      "name": "camera_distance",
+      "type": "float",
+      "default": 8.5,
+      "description": "摄像机距离"
+    },
+    {
+      "name": "camera_height",
+      "type": "float",
+      "default": 26.0,
+      "description": "摄像机高度角度"
+    },
+    {
+      "name": "camera_mouse_follow_enabled",
+      "type": "bool",
+      "default": true,
+      "description": "启用鼠标跟随摄像机"
+    },
+    {
+      "name": "camera_mouse_follow_strength",
+      "type": "float",
+      "default": 0.45,
+      "description": "鼠标跟随强度"
+    }
+  ],
+  "constants": [
+    {
+      "name": "DESTROY_UI_FAST_TIME",
+      "value": 0.08,
+      "description": "破坏UI快速模式时长"
+    },
+    {
+      "name": "DESTROY_UI_COMPLETE_HOLD",
+      "value": 0.12,
+      "description": "破坏完成保持显示时长"
+    },
+    {
+      "name": "DESTROY_UI_WIDTH",
+      "value": 380.0,
+      "description": "破坏UI宽度"
+    },
+    {
+      "name": "DESTROY_UI_HEIGHT",
+      "value": 40.0,
+      "description": "破坏UI高度"
+    },
+    {
+      "name": "DESTROY_UI_TOP_OFFSET_Y",
+      "value": 12.0,
+      "description": "破坏UI顶部偏移"
+    },
+    {
+      "name": "DESTROY_RAYCAST_LENGTH",
+      "value": 64.0,
+      "description": "破坏射线长度"
+    },
+    {
+      "name": "DESTROY_INTERACT_RANGE",
+      "value": 1.5,
+      "description": "破坏交互范围"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_MAX_HORIZONTAL",
+      "value": 2.4,
+      "description": "鼠标跟随最大水平偏移"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_SIDE_BOOST",
+      "value": 1.25,
+      "description": "鼠标跟随侧向增强"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_MAX_DEPTH_UP",
+      "value": 1.8,
+      "description": "鼠标跟随最大深度向上"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_MAX_DEPTH_DOWN",
+      "value": 2.8,
+      "description": "鼠标跟随最大深度向下"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_DEADZONE",
+      "value": 0.04,
+      "description": "鼠标跟随死区"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_RESPONSE_EXP",
+      "value": 1.6,
+      "description": "鼠标跟随响应指数"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_LERP_SPEED_MIN",
+      "value": 5.5,
+      "description": "鼠标跟随最小插值速度"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_LERP_SPEED_MAX",
+      "value": 11.0,
+      "description": "鼠标跟随最大插值速度"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_BOTTOM_COMPENSATION_PX",
+      "value": 90.0,
+      "description": "鼠标跟随底部补偿像素"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_MAX_OFFSET_LENGTH",
+      "value": 5.0,
+      "description": "鼠标跟随最大偏移长度"
+    },
+    {
+      "name": "CAMERA_MOUSE_FOLLOW_DOWN_NY_CAP",
+      "value": 0.8,
+      "description": "鼠标跟随向下法线上限"
+    },
+    {
+      "name": "BUILD_TRANSITION_TIME",
+      "value": 0.5,
+      "description": "建筑模式切换过渡时间"
+    },
+    {
+      "name": "BUILD_CAMERA_HEIGHT_DEFAULT",
+      "value": 30.0,
+      "description": "建筑模式默认摄像机高度"
+    },
+    {
+      "name": "BUILD_CAMERA_HEIGHT_MIN",
+      "value": 3.0,
+      "description": "建筑模式最小摄像机高度"
+    },
+    {
+      "name": "BUILD_CAMERA_HEIGHT_MAX",
+      "value": 60.0,
+      "description": "建筑模式最大摄像机高度"
+    },
+    {
+      "name": "BUILD_CAMERA_ZOOM_MIN",
+      "value": 12.0,
+      "description": "建筑模式最小缩放"
+    },
+    {
+      "name": "BUILD_CAMERA_ZOOM_MAX",
+      "value": 90.0,
+      "description": "建筑模式最大缩放"
+    },
+    {
+      "name": "BUILD_CAMERA_TOPDOWN_PITCH_RAD",
+      "value": -1.5608,
+      "description": "建筑模式俯视俯仰角"
+    },
+    {
+      "name": "BUILD_ROTATE_STEP_DEGREES",
+      "value": 10.0,
+      "description": "建筑旋转步进度数"
+    },
+    {
+      "name": "BUILD_ZOOM_WHEEL_STEP",
+      "value": 1.2,
+      "description": "建筑缩放滚轮步进"
+    },
+    {
+      "name": "BUILD_ZOOM_BUTTON_STEP_SMALL",
+      "value": 1.0,
+      "description": "建筑缩放按钮小步进"
+    },
+    {
+      "name": "BUILD_ZOOM_BUTTON_STEP_LARGE",
+      "value": 10.0,
+      "description": "建筑缩放按钮大步进"
+    },
+    {
+      "name": "BUILD_DRAG_MAX_MOUSE_DELTA",
+      "value": 64.0,
+      "description": "建筑拖拽最大鼠标位移"
+    },
+    {
+      "name": "BUILD_PICK_DOUBLE_CLICK_MS",
+      "value": 380,
+      "description": "建筑拾取双击时间窗口"
+    },
+    {
+      "name": "BUILD_PICK_DOUBLE_CLICK_DIST",
+      "value": 22.0,
+      "description": "建筑拾取双击距离阈值"
+    },
+    {
+      "name": "BUILD_PICK_DEBUG",
+      "value": false,
+      "description": "建筑拾取调试模式"
+    },
+    {
+      "name": "BUILD_ROAD_MAX_CELLS_PER_FRAME",
+      "value": 32,
+      "description": "每帧最大道路绘制单元格数"
+    },
+    {
+      "name": "BUILD_ROTATE_KNOB_SIZE",
+      "value": [26.0, 26.0],
+      "description": "建筑旋转旋钮大小"
+    },
+    {
+      "name": "BUILD_ROTATE_ORBIT_MIN_RADIUS_PX",
+      "value": 20.0,
+      "description": "建筑旋转轨道最小半径"
+    },
+    {
+      "name": "BUILD_ROTATE_ORBIT_MAX_RADIUS_PX",
+      "value": 240.0,
+      "description": "建筑旋转轨道最大半径"
+    },
+    {
+      "name": "BUILD_ROTATE_ORBIT_PADDING_MIN_PX",
+      "value": 2.0,
+      "description": "建筑旋转轨道最小内边距"
+    },
+    {
+      "name": "BUILD_ROTATE_ORBIT_PADDING_MAX_PX",
+      "value": 10.0,
+      "description": "建筑旋转轨道最大内边距"
+    },
+    {
+      "name": "BUILD_ROTATE_ORBIT_PADDING_REF_PX",
+      "value": 140.0,
+      "description": "建筑旋转轨道参考内边距"
+    },
+    {
+      "name": "INTERACT_RAY_LENGTH",
+      "value": 5.2,
+      "description": "交互射线长度"
+    },
+    {
+      "name": "INTERACT_RANGE",
+      "value": 4.6,
+      "description": "交互范围"
+    }
+  ],
+  "enums": [
+    {
+      "name": "RoadBatchMode",
+      "values": ["NONE", "PLACE_WAIT_END", "DELETE_WAIT_END"]
+    },
+    {
+      "name": "DeleteIntent",
+      "values": ["NONE", "PICKED_BUILDING", "ROAD_BATCH"]
+    }
+  ],
+  "groups": []
+}

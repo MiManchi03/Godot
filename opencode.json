@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "anthropic/claude-sonnet-4-6",
+  "small_model": "anthropic/claude-3-5-haiku-20241022",
+  "default_agent": "godot-engineer",
+  "logLevel": "INFO",
+  "instructions": [
+    "AGENTS.md",
+    "HARNESS_PLAN.md"
+  ],
+  "skills": {
+    "paths": [".opencode/skills"]
+  },
+  "agent": {
+    "godot-engineer": {
+      "description": "Godot 4.x 游戏开发工程师，具备完整 Harness 技能访问权限",
+      "mode": "primary",
+      "model": "anthropic/claude-sonnet-4-6",
+      "permission": {
+        "skill": {
+          "godot-*": "allow"
+        }
+      }
+    }
+  },
+  "permission": {
+    "skill": {
+      "godot-*": "allow"
+    },
+    "edit": "allow",
+    "bash": {
+      "git *": "allow",
+      "python *": "allow",
+      "dotnet *": "allow",
+      "timeout *": "allow",
+      "godot *": "allow",
+      "*Godot*": "allow",
+      "head *": "allow",
+      "*": "ask"
+    },
+    "external_directory": {
+      "D:\\Godot\\**": "allow",
+      "D:\\Skills\\**": "allow"
+    }
+  },
+  "experimental": {
+    "compaction": {
+      "auto": true,
+      "tail_turns": 15
+    }
+  }
+}

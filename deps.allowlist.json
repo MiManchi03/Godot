@@ -1,0 +1,30 @@
+{
+  "allowed_autoloads": [
+    "GameSettings",
+    "WorldManager",
+    "InventoryManager",
+    "VillagerSystem",
+    "RoadNetwork",
+    "CursorManager"
+  ],
+  "allowed_singletons": [
+    "GameSettings",
+    "WorldManager",
+    "InventoryManager",
+    "VillagerSystem",
+    "RoadNetwork",
+    "CursorManager"
+  ],
+  "allowed_imports": [
+    "godot",
+    "gut",
+    "*.gd"
+  ],
+  "forbidden_patterns": [
+    "global.*dict",
+    "global.*array",
+    "static.*mut",
+    "singleton.*get_instance"
+  ],
+  "allowed_external_libs": []
+}
