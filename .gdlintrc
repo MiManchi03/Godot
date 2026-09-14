@@ -1,0 +1,15 @@
+# gdtoolkit (gdlint) 配置
+# 追溯：审计 A6（无静态分析）；Phase 4 接入
+# 说明：历史代码在风格规则上有大量遗留，先关闭噪声规则，只保留结构性告警
+disable:
+  - trailing-whitespace
+  - class-definitions-order
+  - max-line-length
+  - max-public-methods
+  - function-arguments-number
+  - unused-argument
+  - duplicate-load
+  - max-returns
+  - max-file-lines
+  - function-preload-variable-name
+  - constant-name

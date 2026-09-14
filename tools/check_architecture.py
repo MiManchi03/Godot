@@ -7,6 +7,7 @@
 
 import sys
 import re
+import fnmatch
 import argparse
 from pathlib import Path
 from typing import List, Dict, Set
@@ -20,9 +21,32 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 sys.path.insert(0, str(Path(__file__).parent))
-from diff_scope import get_added_lines
+from diff_scope import get_added_lines, get_added_lines_range, get_range_files
 
 MAX_FILE_BYTES = 8 * 1024 * 1024  # 超大脚本跳过，避免卡死
+ALLOWLIST_FILE = Path(".harness/arch-allowlist.txt")
+
+
+def load_allowlist() -> List:
+    """架构基线豁免：<文件 glob> :: <违规片段>；仅限历史遗留"""
+    entries = []
+    if not ALLOWLIST_FILE.exists():
+        return entries
+    for line in ALLOWLIST_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "::" not in line:
+            continue
+        path_glob, _, fragment = line.partition("::")
+        entries.append((path_glob.strip(), fragment.strip()))
+    return entries
+
+
+def _exempt(rel_path: str, message: str, allow: List) -> bool:
+    norm = rel_path.replace("\\", "/")
+    for path_glob, fragment in allow:
+        if fnmatch.fnmatch(norm, path_glob) and fragment in message:
+            return True
+    return False
 
 FUNC_RE = re.compile(r'^(\s*)func\s+(_process|_physics_process)\s*\(')
 
@@ -128,31 +152,50 @@ def main():
     parser.add_argument("--all", action="store_true", help="检查所有 .gd")
     parser.add_argument("--added-lines-only", action="store_true",
                         help="仅检查本次暂存新增行（供 pre-commit 用）")
+    parser.add_argument("--base", help="提交区间起点；只查 base..head 的新增行")
+    parser.add_argument("--head", default="HEAD", help="提交区间终点（默认 HEAD）")
     parser.add_argument("files", nargs="*", help="指定文件或目录")
     args = parser.parse_args()
 
-    files = _collect_files(args)
+    if args.base:
+        files = [Path(f).resolve() for f in get_range_files(args.base, args.head)]
+    else:
+        files = _collect_files(args)
+    files = [f for f in files if f.exists() and f.suffix == ".gd"]
     if not files:
         print("ℹ️  无需检查的文件")
         return 0
 
-    added_map = get_added_lines(files) if args.added_lines_only else {}
+    if args.base:
+        added_map = get_added_lines_range(files, args.base, args.head)
+    elif args.added_lines_only:
+        added_map = get_added_lines(files)
+    else:
+        added_map = {}
 
-    scope = "（仅新增行）" if args.added_lines_only else ""
+    scope = "（仅新增行）" if (args.added_lines_only or args.base) else ""
     print(f"🧱 架构规则检查 {len(files)} 个脚本...{scope}")
 
+    allow = load_allowlist()
     total = 0
+    exempted = 0
     for filepath in files:
         allowed = added_map.get(str(filepath))
+        try:
+            rel = filepath.relative_to(Path.cwd())
+        except ValueError:
+            rel = filepath
         for v in check_file(filepath):
             if allowed is not None and v["line"] not in allowed:
                 continue
-            try:
-                rel = filepath.relative_to(Path.cwd())
-            except ValueError:
-                rel = filepath
+            if _exempt(str(rel), v["message"], allow):
+                exempted += 1
+                continue
             print(f"❌ {rel}:{v['line']}: [{v['rule']}] {v['message']}")
             total += 1
+
+    if exempted:
+        print(f"ℹ️  基线豁免 {exempted} 处（见 .harness/arch-allowlist.txt）")
 
     print(f"\n📊 架构检查完成: {total} 个违规")
     if total > 0:

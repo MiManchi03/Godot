@@ -24,3 +24,12 @@
 ### 本地钩子以 GBK 读取 UTF-8 文件即崩溃
 - 现象：`open(f)` 未指定编码，遇中文注释抛 UnicodeDecodeError
 - 现状：[自动] 已移除相关本地钩子，改用官方实现
+
+### VillageService 使用了非法语法 `?.` / `??`
+- 现象：`?.`、`??` 并非合法 GDScript，autoload 加载失败；且 `class_name VillageService` 与同名 autoload 冲突
+- 处置：Phase 4 机械改为显式 null 判断，并移除同名 `class_name`
+- 现状：[自动] gdlint 与 GUT 无头运行都能拦下该类语法错误
+
+### gdtoolkit 对超大脚本会耗尽资源
+- 现象：`world_manager.gd` 达 84 MB，全量 gdlint 会卡住
+- 现状：[自动] `run_gdlint.py` 跳过 > 1 MB 的脚本并给出提示

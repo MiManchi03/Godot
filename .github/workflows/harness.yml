@@ -2,132 +2,13 @@ name: Harness CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master, main, develop]
   pull_request:
-    branches: [main, develop]
-
-env:
-  GODOT_VERSION: "4.6.0"
+    branches: [master, main, develop]
 
 jobs:
-  static-analysis:
-    name: Static Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install pyyaml
-
-      - name: Run Terminology Check
-        run: python tools/check_terminology.py --all --fail-on-warning
-
-      - name: Run Static Analysis (placeholder)
-        run: |
-          echo "Static analysis would run here with gdtoolkit/godot --check-only"
-          # godot --headless --check-only
-
-  contract-validation:
-    name: Contract Validation
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install pyyaml
-
-      - name: Validate Contracts
-        run: |
-          echo "Contract validation would run here"
-          # python tools/validate_contracts.py --all
-
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Godot
-        uses: firebelley/setup-godot@v2
-        with:
-          version: ${{ env.GODOT_VERSION }}
-
-      - name: Run Unit Tests
-        run: |
-          echo "Unit tests would run with GUT"
-          # godot --headless -s addons/gut/gut_cmdln.gd -gdir=tests/unit
-
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Godot
-        uses: firebelley/setup-godot@v2
-        with:
-          version: ${{ env.GODOT_VERSION }}
-
-      - name: Run Integration Tests
-        run: |
-          echo "Integration tests would run with GUT"
-          # godot --headless -s addons/gut/gut_cmdln.gd -gdir=tests/integration
-
-  headless-tests:
-    name: Headless Gameplay Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Godot
-        uses: firebelley/setup-godot@v2
-        with:
-          version: ${{ env.GODOT_VERSION }}
-
-      - name: Run Headless Tests
-        run: |
-          echo "Headless gameplay tests would run"
-          # godot --headless -s addons/gut/gut_cmdln.gd -gdir=tests/headless
-
-  regression-guard:
-    name: Regression Guard
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, headless-tests]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Godot
-        uses: firebelley/setup-godot@v2
-        with:
-          version: ${{ env.GODOT_VERSION }}
-
-      - name: Run Regression Guard
-        run: |
-          echo "Regression guard: baseline vs current comparison"
-          # python tools/regression_guard.py --baseline main --compare HEAD
-
-  change-impact:
-    name: Change Impact Analysis
+  verify:
+    name: verify.sh (terminology + architecture + deps + gdlint + unit tests)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -140,90 +21,30 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: pip install pyyaml
+      - name: Install Python deps
+        run: pip install pyyaml gdtoolkit
 
-      - name: Analyze Change Impact
-        run: |
-          echo "Change impact analysis would run here"
-          # python tools/change_impact.py --changed-files ${{ github.event.pull_request.changed_files }}
-
-  dependency-check:
-    name: Dependency Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Godot
+        uses: firebelley/setup-godot@v2
         with:
-          python-version: "3.11"
+          version: "4.6.1"
 
-      - name: Install dependencies
-        run: pip install pyyaml
-
-      - name: Check Dependencies
+      - name: Resolve base ref
+        id: base
         run: |
-          echo "Dependency check would run here"
-          # python tools/check_dependencies.py --allowlist deps.allowlist.json
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+          fi
 
-  terminology-sync:
-    name: Terminology Sync Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install pyyaml
-
-      - name: Verify Terminology Sync
-        run: |
-          python -c "
-          import yaml
-          import sys
-          
-          # Load terminology
-          with open('.opencode/terminology/TERMINOLOGY.yaml') as f:
-              terms = yaml.safe_load(f)
-          
-          # Load mapping
-          with open('.opencode/routing/zh-en-map.yaml') as f:
-              mapping = yaml.safe_load(f)
-          
-          # Verify all canonical terms in mapping
-          canonicals = set()
-          for cat in ['entities', 'actions', 'systems']:
-              for term in terms.get(cat, []):
-                  canonicals.add(term['canonical'])
-                  for alias in term['aliases']:
-                      if alias != term['canonical']:
-                          if mapping.get(alias) != term['canonical']:
-                              print(f'ERROR: Alias {alias} not mapped to {term[\"canonical\"]}')
-                              sys.exit(1)
-          
-          print('✅ Terminology mapping sync verified')
-          "
+      - name: Run verify.sh
+        run: bash verify.sh --base "${{ steps.base.outputs.ref }}"
 
   all-checks:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: 
-      - static-analysis
-      - contract-validation
-      - unit-tests
-      - integration-tests
-      - headless-tests
-      - regression-guard
-      - change-impact
-      - dependency-check
-      - terminology-sync
+    needs: [verify]
     steps:
-      - name: All Checks Passed
-        run: echo "✅ All Harness CI checks passed!"
+      - name: Done
+        run: echo "All Harness CI checks passed"

@@ -21,6 +21,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).parent))
 from terminology_registry import TerminologyRegistry
+from diff_scope import get_added_lines_range, get_range_files
 
 SUFFIXES = {'.gd', '.tscn', '.md', '.yaml', '.yml', '.json', '.py'}
 EXCLUDE_DIRS = {'.git', '.godot', 'node_modules', 'addons'}
@@ -119,6 +120,8 @@ def main():
     parser.add_argument("--changed-only", action="store_true", help="仅检查变更文件")
     parser.add_argument("--staged", action="store_true", help="仅检查暂存区文件")
     parser.add_argument("--all", action="store_true", help="检查所有相关文件（已排除 vendor 目录）")
+    parser.add_argument("--base", help="提交区间起点；只查 base..head 的新增行")
+    parser.add_argument("--head", default="HEAD", help="提交区间终点（默认 HEAD）")
     parser.add_argument("--added-lines-only", action="store_true",
                         help="仅检查本次暂存新增行（供 pre-commit 用，避免历史遗留阻断）")
     parser.add_argument("--suggest", action="store_true",
@@ -130,7 +133,9 @@ def main():
     registry = TerminologyRegistry()
 
     # 确定要检查的文件
-    if args.files:
+    if args.base:
+        files = [Path(f).resolve() for f in get_range_files(args.base, args.head)]
+    elif args.files:
         collected: List[Path] = []
         for f in args.files:
             collected.extend(_expand(Path(f)))
@@ -157,9 +162,14 @@ def main():
         print("ℹ️  无需检查的文件")
         return 0
 
-    added_map = get_added_lines(files) if args.added_lines_only else {}
+    if args.base:
+        added_map = get_added_lines_range(files, args.base, args.head)
+    elif args.added_lines_only:
+        added_map = get_added_lines(files)
+    else:
+        added_map = {}
 
-    scope = "（仅新增行）" if args.added_lines_only else ""
+    scope = "（仅新增行）" if (args.added_lines_only or args.base) else ""
     print(f"🔍 检查 {len(files)} 个文件的术语一致性...{scope}")
 
     total_errors = 0

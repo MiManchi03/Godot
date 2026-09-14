@@ -1,0 +1,8 @@
+# 架构规则基线豁免（仅限历史遗留；禁止用于新代码）
+# 格式：<文件 glob> :: <违规片段>
+# 追溯：village_service.gd 直取 WorldManager 私有字典；WorldManager 尚无公开访问器，
+#       重构为公开接口留待后续 Phase（见 STATUS.md / HARNESS_PLAN.md）
+scripts/village/village_service.gd :: _world_manager._village_boundaries
+scripts/village/village_service.gd :: _world_manager._building_to_village
+# 单测需要直接调用被测私有方法（GDScript 无友元），豁免 tests/ 下的跨模块私有访问
+tests/** :: ._
