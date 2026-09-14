@@ -50,10 +50,11 @@ def main():
         print("ℹ️  无暂存文件")
         return 0
 
+    scope_path = str(SCOPE_FILE).replace("\\", "/")
     out_of_scope = [
         f for f in staged
-        if not any(fnmatch.fnmatch(f, pat) for pat in scope)
-        and f != str(SCOPE_FILE)
+        if not any(fnmatch.fnmatch(f.replace("\\", "/"), pat) for pat in scope)
+        and f.replace("\\", "/") != scope_path
     ]
 
     print(f"🔒 范围守卫：声明 {len(scope)} 条 glob，暂存 {len(staged)} 个文件")
