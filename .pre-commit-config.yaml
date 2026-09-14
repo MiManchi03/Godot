@@ -12,7 +12,30 @@ repos:
         args: ["--added-lines-only"]
         verbose: true
         stages: [commit]
-      
+
+      # 架构闸口：_process 每帧分配 + 跨脚本私有成员访问
+      # 追溯：红队演练 D1（未被拦截）
+      - id: architecture-check
+        name: Architecture Check (new lines only)
+        entry: python tools/check_architecture.py
+        language: system
+        files: '\.gd$'
+        pass_filenames: true
+        args: ["--added-lines-only"]
+        verbose: true
+        stages: [commit]
+
+      # 依赖白名单：project.godot 的 autoload 必须与 deps.allowlist.json 一致
+      # 追溯：审计 A6/A12 drift
+      - id: dependency-check
+        name: Dependency Allowlist Check
+        entry: python tools/check_dependencies.py
+        language: system
+        files: '^(project\.godot|deps\.allowlist\.json)$'
+        pass_filenames: false
+        verbose: true
+        stages: [commit]
+
       # 暂缓：godot --check-only 不能直接作为逐文件脚本检查器；
       # 阶段 4 将以 gdtoolkit(gdscript-lint) + Godot 无头测试替代
       # - id: godot-static-analyzer
@@ -24,24 +47,12 @@ repos:
       #   pass_filenames: true
       #   stages: [commit]
       #   require_serial: true
-      
-      # 已移除本地 trailing-whitespace / end-of-file-fixer：
-      # 其实现 open(f,'w').write(open(f).read()) 会先截断再读，导致文件被清空
-      # 追溯：演练 D0 中该缺陷把 scripts/drill_d0_bad.gd 清空
-      # 改用下方 pre-commit/pre-commit-hooks 的官方实现
-      - id: check-yaml
-        name: Check YAML Syntax
-        entry: python -c "import yaml, sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
-        language: system
-        files: '\.ya?ml$'
-        stages: [commit]
-      
-      - id: check-json
-        name: Check JSON Syntax
-        entry: python -c "import json, sys; [json.load(open(f)) for f in sys.argv[1:]]"
-        language: system
-        files: '\.json$'
-        stages: [commit]
+
+      # 已移除本地 trailing-whitespace / end-of-file-fixer / check-yaml / check-json：
+      #   - 空白钩子实现 open(f,'w').write(open(f).read()) 会先截断再读，导致文件被清空
+      #   - check-yaml/check-json 以默认 GBK 编码读取，遇 UTF-8 中文即崩溃
+      # 追溯：演练 D0（文件被清空）；Phase 2 提交（GBK 崩溃）
+      # 全部改用下方 pre-commit/pre-commit-hooks 的官方实现
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0

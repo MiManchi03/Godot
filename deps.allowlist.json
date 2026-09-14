@@ -1,19 +1,19 @@
 {
   "allowed_autoloads": [
     "GameSettings",
-    "WorldManager",
+    "CursorManager",
     "InventoryManager",
-    "VillagerSystem",
     "RoadNetwork",
-    "CursorManager"
+    "VillagerSystem",
+    "VillageService"
   ],
   "allowed_singletons": [
     "GameSettings",
-    "WorldManager",
+    "CursorManager",
     "InventoryManager",
-    "VillagerSystem",
     "RoadNetwork",
-    "CursorManager"
+    "VillagerSystem",
+    "VillageService"
   ],
   "allowed_imports": [
     "godot",
