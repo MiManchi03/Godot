@@ -7,7 +7,7 @@ repos:
         name: Terminology Consistency Check (new lines only)
         entry: python tools/check_terminology.py
         language: system
-        types: [gdscript, gdscene, md, yaml, yml, json, py]
+        files: '\.(gd|tscn|md|ya?ml|json|py)$'
         pass_filenames: true
         args: ["--added-lines-only"]
         verbose: true
@@ -43,14 +43,14 @@ repos:
         name: Check YAML Syntax
         entry: python -c "import yaml, sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
         language: system
-        types: [yaml, yml]
+        files: '\.ya?ml$'
         stages: [commit]
       
       - id: check-json
         name: Check JSON Syntax
         entry: python -c "import json, sys; [json.load(open(f)) for f in sys.argv[1:]]"
         language: system
-        types: [json]
+        files: '\.json$'
         stages: [commit]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
