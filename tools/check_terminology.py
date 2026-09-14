@@ -10,6 +10,15 @@ import subprocess
 from pathlib import Path
 from typing import List, Dict, Set
 
+# Windows 默认 GBK stdout 会在输出中文/emoji 时崩溃；强制 UTF-8
+for _stream in (sys.stdout, sys.stderr):
+    _reconf = getattr(_stream, "reconfigure", None)
+    if _reconf is not None:
+        try:
+            _reconf(encoding="utf-8")
+        except Exception:
+            pass
+
 sys.path.insert(0, str(Path(__file__).parent))
 from terminology_registry import TerminologyRegistry
 

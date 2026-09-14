@@ -25,20 +25,10 @@ repos:
       #   stages: [commit]
       #   require_serial: true
       
-      - id: trailing-whitespace
-        name: Trim Trailing Whitespace
-        entry: python -c "import sys; [open(f, 'w').write(open(f).read().rstrip() + '\n') for f in sys.argv[1:]]"
-        language: system
-        types: [text]
-        stages: [commit]
-      
-      - id: end-of-file-fixer
-        name: Fix End of Files
-        entry: python -c "import sys; [open(f, 'wb').write(open(f, 'rb').read().rstrip() + b'\n') for f in sys.argv[1:]]"
-        language: system
-        types: [text]
-        stages: [commit]
-      
+      # 已移除本地 trailing-whitespace / end-of-file-fixer：
+      # 其实现 open(f,'w').write(open(f).read()) 会先截断再读，导致文件被清空
+      # 追溯：演练 D0 中该缺陷把 scripts/drill_d0_bad.gd 清空
+      # 改用下方 pre-commit/pre-commit-hooks 的官方实现
       - id: check-yaml
         name: Check YAML Syntax
         entry: python -c "import yaml, sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]"
