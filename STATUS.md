@@ -28,6 +28,7 @@ Phase 7（回归守护 + 性能基准）完成待验收
 - 契约：`python tools/validate_contracts.py`
 - 回归守护：`python tools/regression_guard.py`（基线 `.harness/test-baseline.json`）
 - 性能基准：`python tools/benchmark.py`（基线 `.harness/bench-baseline.json`）
+- 健康度体检：`bash scripts/harness_health.sh`（7 项指标，追加到 `docs/harness-health.log`）
 - save schema：`python tools/check_save_schema.py`
 - 引擎：`GODOT_PATH` 或默认 4.6.1 安装路径
 
